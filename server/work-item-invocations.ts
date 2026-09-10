@@ -1,3 +1,4 @@
+import { primaryWakeEligibility, WakeDeliveryError } from "./wake-delivery-store.ts";
 import type Database from "better-sqlite3";
 import type { Outcome } from "../shared/work-item-lifecycle.ts";
 
@@ -89,6 +90,7 @@ export function startRunInvocation(db: Database.Database, input: {
   runKey: string;
   providerId: string;
   startedAt: number;
+  primaryWake?: boolean;
 }): RunInvocationRow {
   return db.transaction(() => {
     const run = db.prepare(`SELECT ended_at, provider_generation FROM sessions
@@ -96,6 +98,11 @@ export function startRunInvocation(db: Database.Database, input: {
       { ended_at: number | null; provider_generation: number } | undefined;
     if (!run) throw new Error(`work-item run ${input.runKey} not found`);
     if (run.ended_at !== null) throw new Error(`work-item run ${input.runKey} is sealed`);
+    const identity = db.prepare("SELECT work_item_id,run_kind FROM sessions WHERE session_key=?")
+      .get(input.runKey) as { work_item_id: string; run_kind: string };
+    if (input.primaryWake && identity.run_kind === "primary" && primaryWakeEligibility(db, identity.work_item_id, input.runKey) === "obsolete") {
+      throw new WakeDeliveryError("obsolete", "Primary invocation no longer owns the open run");
+    }
     const prior = db.prepare(`SELECT COALESCE(MAX(provider_generation), 0) AS generation
       FROM run_invocations WHERE run_key = ?`).get(input.runKey) as { generation: number };
     const generation = Math.max(run.provider_generation, prior.generation) + 1;

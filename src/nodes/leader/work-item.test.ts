@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { WorkItemSnapshot } from "../../../shared/work-item-contracts.ts";
 import { applyCanvasWorkItemSnapshot, canonicalPromptCommand, selectCanvasChangeMode,
   formatCanvasWorkItemStatus, selectCanvasWorkItem } from "./work-item.ts";
+import { LEADER_DEFAULT_DATA } from "./types.ts";
+import { extractLeaderCore } from "./session-context.ts";
+import { preserveOptimisticUserMessages, sessionStreamReducer } from "../../session-stream.ts";
 
 function item(over: Partial<WorkItemSnapshot> = {}): WorkItemSnapshot {
   return {
@@ -65,6 +68,31 @@ describe("Canvas canonical work-item projection", () => {
     const fileWait = item({ lifecycle: { ...item().lifecycle, runtimeState: "waiting", outcome: "none" },
       waitKind: "file_conflict" });
     expect(canonicalPromptCommand(fileWait, "answer").type).toBe("continue_work_item");
+  });
+
+  it("does not restore previous user turns when the next iteration syncs", () => {
+    const previous = { ...LEADER_DEFAULT_DATA, sessionKey: "run-1", workItemId: "work-1",
+      workItemSnapshot: item(), streamingText: "Old partial response", streamingBlockIndex: null, totalCost: 2, turns: 4,
+      messages: [{ id: "old-user", role: "user" as const, content: "Previous instruction", timestamp: 1 }] };
+    const next = applyCanvasWorkItemSnapshot(previous, item({ currentRunKey: "run-2",
+      iteration: 2, lifecycle: { ...item().lifecycle, lifecycleRevision: 3 } }));
+    expect(next).toMatchObject({ sessionKey: "run-2", messages: [], streamingText: "",
+      totalCost: 0, turns: 0 });
+    const synced = sessionStreamReducer(extractLeaderCore(next), { type: "sync_response", sessionKey: "run-2",
+      found: true, events: [{ type: "sdk_event", sessionKey: "run-2", timestamp: 2,
+        event: { kind: "text", role: "user", text: "Next instruction" } }] }, "lm");
+    expect(preserveOptimisticUserMessages(next.messages, synced.messages).map(m => m.content))
+      .toEqual(["Next instruction"]);
+    expect(previous.messages).toHaveLength(1);
+  });
+
+  it("preserves local user turns for same-run updates and the initial launch", () => {
+    const messages = [{ id: "user", role: "user" as const, content: "Current instruction", timestamp: 1 }];
+    for (const sessionKey of [null, "run-1"]) {
+      const next = applyCanvasWorkItemSnapshot({ ...LEADER_DEFAULT_DATA, sessionKey, messages }, item());
+      expect(next.sessionKey).toBe("run-1");
+      expect(next.messages).toBe(messages);
+    }
   });
 
   it("ignores a stale snapshot so a late event cannot roll the node back", () => {

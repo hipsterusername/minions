@@ -26,7 +26,7 @@ import { projectTaskGraphSnapshot } from "./view.ts";
 type Row=Record<string,unknown>;
 const log=serverLogger.child("task-graph-service");
 export interface TaskGraphChildLauncher {
-  startChildRun(input:{workItemId:string;parentRunKey:string;taskId:string;attemptId:string;
+  startChildRun(input:{workItemId:string;parentRunKey:string;taskId:string;attemptId:string;systemPrompt?:string;
     attemptNumber:number;prompt:string;requestId:string;harness?:string;model?:string;
     resumeId?:string;invocationKind?:"new_run"|"resume_open_run";
     executorClass?:"mechanical"|"standard"|"reasoning";toolAllowlist?:string[];

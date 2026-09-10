@@ -1,7 +1,7 @@
 import { ActivityLoading, type ActivityLoadingProps } from "../ActivityLoading.tsx";
 import { ChatLinkScope } from "../components/ChatLink.tsx";
-import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { AgentMessageText } from "../components/AgentMessageText.tsx";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ListX, Plus, RotateCcw, X } from "lucide-react";
 
 import type { MobileSessionInfo, ActivityVisibility } from "./mobile-selectors.ts";
@@ -28,7 +28,17 @@ import {
   type LifecycleAction,
 } from "./mobile-activity-actions.ts";
 
+export interface ActivityViewMemory {
+  visibility?: ActivityVisibility;
+  summaryFilter?: ActivitySummaryFilter | null;
+  scrollTop?: number;
+}
+
 interface ActivityScreenProps extends ActivityLoadingProps {
+  memory?: ActivityViewMemory;
+  resumeSession?: MobileSessionInfo | undefined;
+  onOpenReview?: ((sessionKey: string) => void) | undefined;
+  approvalSessionKeys?: string[];
   sessions: MobileSessionInfo[];
   onOpenSession: (sessionKey: string) => void;
   onNewLeader?: () => void;
@@ -194,17 +204,19 @@ function LifecycleActions({
 function TriageRow({
   session,
   onOpenSession,
+  onOpenReview,
   onAction,
   checked,
   onToggleSelect,
 }: {
   session: MobileSessionInfo;
   onOpenSession: (sessionKey: string) => void;
+  onOpenReview?: ((sessionKey: string) => void) | undefined;
   onAction?: ((action: LifecycleAction, session: MobileSessionInfo) => void) | undefined;
   checked?: boolean;
   onToggleSelect?: (() => void) | undefined;
 }) {
-  const kind = attentionKind(session);
+  const kind = onOpenReview ? "changes" : attentionKind(session);
   const retainedInactive = session.status === "inactive"
     && session.reviewLifecycle?.reviewState === "interrupted_to_review"
     && session.reviewLifecycle.acknowledgedAt == null
@@ -232,7 +244,7 @@ function TriageRow({
           <span className="mob-triage-line">
             <span className="mob-triage-title">{sessionDisplayTitle(session)}</span>
             <span className={`mob-triage-reason mob-triage-reason--${kind}`}>
-              {attentionReason(session)}
+              {onOpenReview ? "changes ready" : attentionReason(session)}
             </span>
           </span>
           <span className="mob-triage-sub">
@@ -246,9 +258,9 @@ function TriageRow({
           <button
             className="mob-mini-btn mob-mini-btn--primary"
             type="button"
-            onClick={() => onOpenSession(session.sessionKey)}
+            onClick={() => (onOpenReview ?? onOpenSession)(session.sessionKey)}
           >
-            {attentionAction(session)}
+            {onOpenReview ? "Review changes" : attentionAction(session)}
           </button>
         ) : null}
         {onAction ? <LifecycleActions session={session} onAction={onAction} /> : null}
@@ -407,7 +419,7 @@ function RunHistory({
                   aria-label={`Preview of iteration ${run.runNumber}`}>
                   <strong>Read-only preview</strong>
                   <ChatLinkScope project={session.projectId} cwd={session.cwd}>
-                    <SimpleMarkdown text={run.finalReport ?? "This iteration did not publish a final report."} />
+                    <AgentMessageText text={run.finalReport ?? "This iteration did not publish a final report."} />
                   </ChatLinkScope>
                 </div>
               ) : null}
@@ -423,11 +435,22 @@ function RunHistory({
 }
 
 export function ActivityScreen({ loading = false, loadError = null, onRetryLoad, connected = true, sessions, onOpenSession, onNewLeader, notice,
-  workItemRuns = {}, runNextCursor = {}, onLoadRuns, send }: ActivityScreenProps) {
-  const [visibility, setVisibility] = useState<ActivityVisibility>("open");
+  workItemRuns = {}, runNextCursor = {}, onLoadRuns, send, memory, resumeSession, onOpenReview, approvalSessionKeys = [] }: ActivityScreenProps) {
+  const [visibility, setVisibility] = useState<ActivityVisibility>(memory?.visibility ?? "open");
   const [selecting, setSelecting] = useState(false);
-  const [summaryFilter, setSummaryFilter] = useState<ActivitySummaryFilter | null>(null);
+  const [summaryFilter, setSummaryFilter] = useState<ActivitySummaryFilter | null>(memory?.summaryFilter ?? null);
   const [checkedKeys, setCheckedKeys] = useState<Set<string>>(() => new Set());
+  const screenRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (screenRef.current) screenRef.current.scrollTop = memory?.scrollTop ?? 0;
+  }, [memory]);
+  useLayoutEffect(() => {
+    if (memory) { memory.visibility = visibility; memory.summaryFilter = summaryFilter; }
+  }, [memory, visibility, summaryFilter]);
+  const rememberScroll = () => {
+    if (memory && screenRef.current) memory.scrollTop = screenRef.current.scrollTop;
+  };
+
 
   const toggleChecked = (sessionKey: string) =>
     setCheckedKeys((prev) => {
@@ -440,7 +463,8 @@ export function ActivityScreen({ loading = false, loadError = null, onRetryLoad,
   // Minions are spawned and managed by their leader; the mobile Activity list
   // surfaces top-level sessions only, so their cards are filtered out here.
   const visibilitySessions = sessions
-    .filter((session) => session.role !== "minion" && isVisibleInActivity(session, visibility))
+    .filter((session) => session.role !== "minion" && (isVisibleInActivity(session, visibility)
+      || (visibility === "open" && approvalSessionKeys.includes(session.sessionKey))))
     .sort(compareActivityPriority);
   const visibleSessions = summaryFilter
     ? visibilitySessions.filter((session) => matchesSummaryFilter(session, summaryFilter))
@@ -537,7 +561,7 @@ export function ActivityScreen({ loading = false, loadError = null, onRetryLoad,
 
   const loadPending = loading || Boolean(loadError);
   if (visibilitySessions.length === 0 && loadPending) {
-    return <main className="mob-screen mob-activity" aria-label="Activity">
+    return <main ref={screenRef} onScroll={rememberScroll} className="mob-screen mob-activity" aria-label="Activity">
       <header className="mob-screen-header"><h1>Activity</h1></header>
       {notice ? <NoticeBanner notice={notice} /> : null}
       {filters}
@@ -547,7 +571,7 @@ export function ActivityScreen({ loading = false, loadError = null, onRetryLoad,
   if (visibilitySessions.length === 0) {
     const canStartFirstLeader = sessions.length === 0 && visibility !== "dismissed" && onNewLeader;
     return (
-      <main className="mob-screen mob-activity" aria-label="Activity">
+      <main ref={screenRef} onScroll={rememberScroll} className="mob-screen mob-activity" aria-label="Activity">
         <header className="mob-screen-header">
           <h1>Activity</h1>
           <span className="mob-count">0</span>
@@ -577,7 +601,7 @@ export function ActivityScreen({ loading = false, loadError = null, onRetryLoad,
   }
 
   return (
-    <main className="mob-screen mob-activity" aria-label="Activity">
+    <main ref={screenRef} onScroll={rememberScroll} className="mob-screen mob-activity" aria-label="Activity">
       <header className="mob-screen-header">
         <div className="mob-activity-heading">
           <h1>Activity</h1>
@@ -594,6 +618,11 @@ export function ActivityScreen({ loading = false, loadError = null, onRetryLoad,
       {notice ? <NoticeBanner notice={notice} /> : null}
 
       {loadPending && <ActivityLoading loadError={loadError} onRetryLoad={onRetryLoad} connected={connected} />}
+      {resumeSession ? <button type="button" className="mob-resume-session"
+        aria-label={`Continue conversation ${sessionDisplayTitle(resumeSession)}`}
+        onClick={() => onOpenSession(resumeSession.sessionKey)}>
+        <span>Continue conversation</span><strong>{sessionDisplayTitle(resumeSession)} →</strong>
+      </button> : null}
       <div className="mob-activity-summary" aria-label="Filter activity by status">
         {summaryItems.map((item) => {
           const selected = summaryFilter === item.id;
@@ -673,6 +702,7 @@ export function ActivityScreen({ loading = false, loadError = null, onRetryLoad,
                 <TriageRow
                   session={session}
                   onOpenSession={onOpenSession}
+                  onOpenReview={approvalSessionKeys.includes(session.sessionKey) || session.reviewableChanges ? onOpenReview : undefined}
                   onAction={handleAction}
                   checked={checkedKeys.has(session.sessionKey)}
                   onToggleSelect={

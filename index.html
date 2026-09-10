@@ -11,8 +11,12 @@
     <meta name="apple-mobile-web-app-title" content="Minions" />
     <title>Minions</title>
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="margin:0;background:#0a0e1a;color:#e6ecf5">
+    <div id="root">
+      <div role="status" aria-live="polite" style="min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font-family:system-ui,sans-serif;text-align:center">
+        <div><strong style="display:block;font-size:18px">Minions</strong><span style="display:block;margin-top:8px;color:#aab3c5">Loading workspace…</span></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

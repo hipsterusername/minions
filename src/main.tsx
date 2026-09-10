@@ -8,6 +8,7 @@ import {
   selectRootView,
   type ViewPreference,
 } from "./view-route.ts";
+import { RootErrorBoundary, RootLoadingScreen } from "./RootLoadState.tsx";
 
 // Route gate: the mobile Leader Console (`/m*`) and the desktop canvas are
 // each code-split so visiting one never downloads the other's bundle. The
@@ -49,7 +50,11 @@ const view = selectRootView({
 if (window.location.pathname === "/file-view") {
   const FileLinkView = lazy(() => import("./FileLinkView.tsx"));
   createRoot(document.getElementById("root")!).render(
-    <StrictMode><Suspense fallback={null}><FileLinkView /></Suspense></StrictMode>,
+    <StrictMode>
+      <RootErrorBoundary>
+        <Suspense fallback={<RootLoadingScreen />}><FileLinkView /></Suspense>
+      </RootErrorBoundary>
+    </StrictMode>,
   );
 } else if (view === "mobile" && !window.location.pathname.startsWith("/m")) {
   // Small-screen visitor hit a desktop URL: hop onto `/m` before rendering so
@@ -63,9 +68,11 @@ if (window.location.pathname === "/file-view") {
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <Suspense fallback={null}>
-        <RootApp />
-      </Suspense>
+      <RootErrorBoundary>
+        <Suspense fallback={<RootLoadingScreen />}>
+          <RootApp />
+        </Suspense>
+      </RootErrorBoundary>
     </StrictMode>,
   );
 }

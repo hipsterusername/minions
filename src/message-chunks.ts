@@ -1,3 +1,5 @@
+import { parseAgentJson } from "./agent-message-format.ts";
+
 export type MessageChunkType = "heading" | "paragraph" | "list" | "code";
 
 export interface MessageChunk {
@@ -40,6 +42,8 @@ function createChunk(
  * the exact markdown-ish text the model produced.
  */
 export function parseMessageChunks(text: string): MessageChunk[] {
+  // Blank lines inside pretty-printed JSON must not split a report into invalid fragments.
+  if (parseAgentJson(text)) return [{ id: "paragraph-0", type: "paragraph", rawText: text }];
   const lines = text.split("\n");
   const chunks: MessageChunk[] = [];
   let i = 0;

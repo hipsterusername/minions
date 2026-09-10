@@ -180,11 +180,14 @@ describe("buildHarnessStartOpts — capability gating", () => {
     expect(startOpts.sandboxPolicy?.unsupported).toEqual(["filesystem:workspace-write", "approval"]);
   });
 
-  it("retains the requested sandbox policy when a follow-up omits it", () => {
+  it.each([
+    { filesystemScope: "read-only", approvalPolicy: "always" },
+    { filesystemScope: "unrestricted", approvalPolicy: "always", fullHostScope: "leader-and-minions" },
+  ] as const)("retains the requested sandbox policy when a follow-up omits it: %j", (requested) => {
     const host = fakeHost() as SessionHost;
     host.sandboxPolicy = {
-      requested: { filesystemScope: "read-only", approvalPolicy: "always" },
-      effective: { filesystemScope: "read-only", approvalPolicy: "always" },
+      requested,
+      effective: { filesystemScope: requested.filesystemScope, approvalPolicy: requested.approvalPolicy },
       unsupported: [],
     };
     const { startOpts } = buildHarnessStartOpts({
@@ -199,9 +202,8 @@ describe("buildHarnessStartOpts — capability gating", () => {
       } }),
       prompt: "follow up",
     });
-    const expected = { filesystemScope: "read-only", approvalPolicy: "always" };
-    expect(startOpts.sandboxPolicy?.requested).toEqual(expected);
-    expect(host.sandboxPolicy.requested).toEqual(expected);
+    expect(startOpts.sandboxPolicy?.requested).toEqual(requested);
+    expect(host.sandboxPolicy.requested).toEqual(requested);
   });
 
   it("retains Claude acceptEdits as a normalized restart permission", () => {

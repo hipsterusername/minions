@@ -282,3 +282,102 @@
   .changes-spin,
   .changes-card { animation: none; }
 }
+
+.changes-card__disclaimer {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.changes-card__top--refresh {
+  flex-wrap: nowrap;
+  min-height: 18px;
+}
+.changes-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  color: var(--text-muted);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+}
+.changes-refresh[data-loading="true"] {
+  opacity: .65;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.live-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.live-changes__header,
+.live-changes__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.live-changes .changes-card__stats,
+.live-changes .changes-card__disclaimer,
+.live-changes__empty,
+.live-changes__error {
+  margin: 0;
+}
+.live-changes .changes-card__disclaimer {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.live-changes .changes-card__files {
+  margin: 0;
+  padding: 4px 8px;
+  background: var(--bg-surface);
+  border: var(--border-width, 1px) solid var(--border-default);
+  max-height: 320px;
+}
+.live-changes .changes-file {
+  gap: 6px;
+  padding: 5px 0;
+}
+.live-changes .changes-file + .changes-file {
+  border-top: 1px solid var(--border-default);
+}
+.live-changes .changes-file__path {
+  min-width: 0;
+  color: var(--text-secondary);
+}
+.live-changes .changes-file > span:not(.changes-file__path) {
+  flex-shrink: 0;
+}
+.live-changes .changes-file__status { color: var(--accent); }
+.live-changes .changes-file__status[data-status="added"] { color: var(--success-color); }
+.live-changes .changes-file__status[data-status="deleted"],
+.live-changes__error { color: var(--status-error); }
+.live-changes__footer {
+  border-top: 1px solid var(--border-default);
+  padding-top: 10px;
+}
+.live-changes__updated {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.live-changes__footer .changes-btn { flex-shrink: 0; }
+.live-changes .changes-add,
+.live-changes .changes-del { font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) {
+  .changes-refresh { transition: none; }
+}

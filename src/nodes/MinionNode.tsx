@@ -1,5 +1,5 @@
 import { MinionsIcon, type MinionsIconName } from "../components/MinionsIcon.tsx";
-import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from "react";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { MINION_THINKING_CONFIG } from "../types.ts";
 import { registerNodeType } from "../node-registry.ts";
@@ -18,7 +18,8 @@ import { msgId, type DisplayMessage } from "../sdk-messages.ts";
 import { CopyButton } from "../components/CopyButton.tsx";
 import { AddAsNodeButton } from "../components/AddAsNodeButton.tsx";
 import { UserContextHeader } from "../components/UserContextHeader.tsx";
-import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
+import { AgentMessageText } from "../components/AgentMessageText.tsx";
+import { parseAgentJson } from "../agent-message-format.ts";
 import { STATUS_COLORS, PRIORITY_COLORS } from "../palette.ts";
 import {
   preserveOptimisticUserMessages,
@@ -144,11 +145,15 @@ function MinionLogEntry({
   onAddContentNode?: ((content: string) => void) | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const isLong = msg.content.length > 700 || msg.content.split("\n").length > 10;
+  const isMarkdown = msg.role === "assistant" || msg.role === "result";
+  const hasReportDisclosure = useMemo(() => {
+    const parsed = isMarkdown ? parseAgentJson(msg.content) : null;
+    return parsed?.value !== null && typeof parsed?.value === "object";
+  }, [isMarkdown, msg.content]);
+  const isLong = !hasReportDisclosure && (msg.content.length > 700 || msg.content.split("\n").length > 10);
   const renderedText =
     !expanded && isLong ? `${msg.content.slice(0, 700).trimEnd()}...` : msg.content;
   const meta = MINION_LOG_ROLE[msg.role];
-  const isMarkdown = msg.role === "assistant" || msg.role === "result";
 
   return (
     <div
@@ -212,7 +217,7 @@ function MinionLogEntry({
           overflowWrap: "break-word",
         }}
       >
-        {isMarkdown ? <SimpleMarkdown text={renderedText} /> : renderedText}
+        {isMarkdown ? <AgentMessageText text={msg.content} maxLength={!expanded && isLong ? 700 : undefined} /> : renderedText}
         {msg.suffix && (
           <span
             style={{
@@ -1014,11 +1019,8 @@ export function MinionNodeRenderer({
               color: activeTask.status === "completed" ? "var(--success-color)" : activeTask.status === "blocked" ? "var(--status-warning)" : "var(--status-error)",
               fontFamily: "var(--font-mono)",
               marginTop: 2,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
             }}>
-              {activeTask.result}
+              <AgentMessageText text={activeTask.result} />
             </div>
           )}
         </div>

@@ -119,6 +119,7 @@ describe("leader agent wiring", () => {
       "load_skill", "load_subskill", "load_skill_attachment", "update_project_context",
     ]);
     expect(graphNames).toEqual([
+      "list_minion_context_blocks", "preview_minion_context",
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
       "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
       "submit_graph_plan", "submit_dialectic_graph", "get_graph_plan", "start_graph_plan",
@@ -149,6 +150,7 @@ describe("leader agent wiring", () => {
       "load_skill", "load_subskill", "load_skill_attachment", "update_project_context",
     ]);
     expect(result.toolGroups["graph-planner"]!.map((tool) => tool.name)).toEqual([
+      "list_minion_context_blocks", "preview_minion_context",
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
       "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
       "submit_graph_plan", "submit_dialectic_graph", "get_graph_plan", "start_graph_plan",

@@ -1,5 +1,5 @@
-import { SimpleMarkdown } from "./SimpleMarkdown.tsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { AgentMessageText } from "./AgentMessageText.tsx";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { DisplayMessage } from "../sdk-messages.ts";
 import { MessageTimestamp } from "./MessageTimestamp.tsx";
@@ -7,8 +7,35 @@ import {
   groupMessages,
   isHiddenTool,
   toolDisplayInfo,
+  type LeaderMessageGroup,
 } from "../nodes/leader-message-helpers.ts";
 import "./session-transcript.css";
+
+/** Navigation metadata, never an agent or system message. */
+export interface TranscriptBoundary {
+  kind: "run-boundary";
+  id: string;
+  label: string;
+  content: string;
+  onInspect?: () => void;
+}
+
+export type TranscriptEntry = DisplayMessage | TranscriptBoundary;
+
+function groupTranscript(entries: TranscriptEntry[]): (LeaderMessageGroup | TranscriptBoundary)[] {
+  const groups: (LeaderMessageGroup | TranscriptBoundary)[] = [];
+  let messages: DisplayMessage[] = [];
+  for (const entry of entries) {
+    if ("kind" in entry) {
+      groups.push(...groupMessages(messages), entry);
+      messages = [];
+    } else {
+      messages.push(entry);
+    }
+  }
+  groups.push(...groupMessages(messages));
+  return groups;
+}
 
 /**
  * Read-only conversation transcript for the Activity inspector.
@@ -88,12 +115,14 @@ export function SessionTranscript({
   streamingText,
   thinking = false,
 }: {
-  messages: DisplayMessage[];
+  messages: TranscriptEntry[];
   streamingText: string;
   thinking?: boolean | undefined;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
+  const anchorScope = useId();
+  const anchorId = (boundary: TranscriptBoundary) => `${anchorScope}-${boundary.id}`;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -111,13 +140,37 @@ export function SessionTranscript({
     }
   }, [messages.length, streamingText, thinking]);
 
-  const groups = useMemo(() => groupMessages(messages), [messages]);
+  const groups = useMemo(() => groupTranscript(messages), [messages]);
+  const boundaries = groups.filter((group) => group.kind === "run-boundary");
   const hasContent = groups.length > 0 || streamingText.length > 0 || thinking;
 
   return (
     <div className="act-tx" ref={scrollRef}>
       {!hasContent && <div className="act-tx-empty">No messages yet.</div>}
       {groups.map((group, i) => {
+        if (group.kind === "run-boundary") {
+          const index = boundaries.indexOf(group);
+          const previous = boundaries[index - 1];
+          const next = boundaries[index + 1];
+          const jumpLink = (target: TranscriptBoundary, text: string, label?: string) => (
+            <a href={`#${encodeURIComponent(anchorId(target))}`} aria-label={label}
+              onClick={() => {
+                wasAtBottomRef.current = false;
+                document.getElementById(anchorId(target))?.focus({ preventScroll: true });
+              }}>{text}</a>
+          );
+          return (
+            <nav key={group.id} id={anchorId(group)} tabIndex={-1}
+              className="act-tx-run-boundary" aria-label={`${group.label} navigation`}>
+              {jumpLink(group, group.content)}
+              <span className="act-tx-run-boundary-line" aria-hidden="true" />
+              {group.onInspect && <button type="button" onClick={group.onInspect}
+                aria-label={`Inspect ${group.label}`}>Inspect</button>}
+              {previous && jumpLink(previous, "↑", `Previous: ${previous.label}`)}
+              {next && jumpLink(next, "↓", `Next: ${next.label}`)}
+            </nav>
+          );
+        }
         if (group.kind === "tool-group") {
           return <ToolChip key={`tools-${i}`} msgs={group.msgs} />;
         }
@@ -142,7 +195,7 @@ export function SessionTranscript({
                 className="act-tx-msg-time"
               />
             </div>
-            <div className="act-tx-msg-body">{msg.role === "assistant" || msg.role === "result" ? <SimpleMarkdown text={msg.content} /> : msg.content}</div>
+            <div className="act-tx-msg-body">{msg.role === "assistant" || msg.role === "result" ? <AgentMessageText text={msg.content} /> : msg.content}</div>
           </div>
         );
       })}
@@ -152,7 +205,7 @@ export function SessionTranscript({
             <span className="act-tx-msg-role">Agent</span>
             <span className="act-tx-msg-dot" aria-hidden="true" />
           </div>
-          <div className="act-tx-msg-body"><SimpleMarkdown text={streamingText} /></div>
+          <div className="act-tx-msg-body"><AgentMessageText text={streamingText} /></div>
         </div>
       )}
       {thinking && !streamingText && (

@@ -19,6 +19,7 @@ export const TASK_GRAPH_LEADER_TASK_TOOL_NAMES = [
 ] as const;
 
 export const TASK_GRAPH_PLANNING_TOOL_NAMES = [
+  "list_minion_context_blocks", "preview_minion_context",
   "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
   "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
   "submit_graph_plan", "submit_dialectic_graph", "get_graph_plan", "start_graph_plan",

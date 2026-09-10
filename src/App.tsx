@@ -14,7 +14,7 @@ import { parseSkillTransfer } from "./skills/skill-transfer.ts";
 import { Suspense, lazy, useState, useEffect, useReducer, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { featureFlagStore, FLAG_MCP_SERVERS } from "./feature-flags.ts";
 import { Canvas } from "./Canvas.tsx";
-import { activeWorkspaceId, visibleZoneNodes } from "./canvas-zones.ts";
+import { activeWorkspaceId, createZone, visibleZoneNodes } from "./canvas-zones.ts";
 import { useSocket } from "./use-socket.ts";
 import { HarnessListProvider } from "./use-harness-list.tsx";
 import { useAutosave } from "./use-autosave.ts";
@@ -186,6 +186,8 @@ function ProjectView({
   const [loaderAnimDone, setLoaderAnimDone] = useState(false);
   const [loaderUnmounted, setLoaderUnmounted] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>("activity");
+  const [activityHomeRequest, setActivityHomeRequest] = useState(0);
+  const [activityHasDraft, setActivityHasDraft] = useState(false);
   const [activitySelection, setActivitySelection] = useState<string | null>(null);
 
   // MCP servers is a still-evolving feature, gated off by default behind
@@ -735,7 +737,7 @@ function ProjectView({
               retryCount={retryCount}
               retry={retry}
               activeView={activeView}
-              onViewChange={view => { setActivitySelection(null); setActiveView(view); }}
+              onViewChange={view => { setActivitySelection(null); setActiveView(view); if (view === "activity") setActivityHomeRequest(value => value + 1); }}
               activityAttentionCount={activityAttentionCount + changesCount}
               settings={projectSettings}
               onSettingsChange={handleSettingsChange}
@@ -744,9 +746,12 @@ function ProjectView({
               socketSend={socket.send}
               socketSubscribe={socket.subscribe}
             />
-            {activeView === "activity" ? (
-              <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
+            {(activeView === "activity" || activityHasDraft) && (
+              <div hidden={activeView !== "activity"} style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
                 <ActivityView
+                  active={activeView === "activity"}
+                  homeRequest={activityHomeRequest}
+                  onDraftPresenceChange={setActivityHasDraft}
                   loading={!sessionsLoaded || workItemState.loading}
                   loadError={workItemState.loadError}
                   onRetryLoad={workItemState.retryLoad}
@@ -756,7 +761,12 @@ function ProjectView({
                   initialSelectedKey={activitySelection}
                   nodes={nodes}
                   onLaunchLeader={handleLaunchActivityLeader}
-                  onCommitLaunchLeader={(node) => dispatch({ type: "ADD_NODE", node })}
+                  onCommitLaunchLeader={(node, workspaceId) => dispatch({ type: "ADD_NODE", node, workspaceId })}
+                  onCreateWorkspace={(name) => {
+                    const workspace = createZone(`workspace-${generateId()}`, name);
+                    dispatch({ type: "ADD_NODE", node: workspace });
+                    return workspace.id;
+                  }}
                   onCancelLaunchLeader={(nodeId) => dispatch({ type: "REMOVE_NODE", id: nodeId })}
                   onOpenInCanvas={handleFocusNode}
                   onExpandFullscreen={handleExpandFullscreen}
@@ -786,7 +796,8 @@ function ProjectView({
                   onClearPromptFailure={workItemState.clearPromptFailure}
                 />
               </div>
-            ) : (
+            )}
+            {activeView !== "activity" && (
               <div style={{ position: "absolute", top: PROJECT_HEADER_HEIGHT, left: 0, right: 0, bottom: 0 }}>
                 <Canvas
                   nodes={nodes}

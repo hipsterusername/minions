@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
 import type { SocketSubscribe } from "./use-socket.ts";
@@ -35,7 +36,9 @@ export function ActivityEmptyState({
   socketSubscribe,
   projectId, projectPath,
   projectSettings,
+  launchWorkspaceControl,
 }: {
+  launchWorkspaceControl?: ReactNode;
   title?: string | undefined;
   subtitle?: string | undefined;
   /** Use the same composer-first presentation as the New leader workspace. */
@@ -111,6 +114,7 @@ export function ActivityEmptyState({
             <LeaderNodeRenderer
               node={launchNode}
               launchMode
+              launchWorkspaceControl={launchWorkspaceControl}
               isSelected
               onUpdateData={(data) => onUpdateNodeData(launchNode.id, data as LeaderData)}
               socketSend={socketSend}

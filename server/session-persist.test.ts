@@ -415,7 +415,7 @@ describe("session-persist integration", () => {
     expect(mode).toBe(0o600);
   });
 
-  it("persisted events round-trip via hydrate (regression: completed leader chat history was lost on restart)", () => {
+  it("hydration leaves transcript bodies unloaded and exact history loads on demand", () => {
     persistSession(makeSession());
     const evt1: BufferedEvent = {
       type: "sdk_event",
@@ -434,12 +434,11 @@ describe("session-persist integration", () => {
 
     const hydrated = hydrateSessionsFromDb();
     expect(hydrated).toHaveLength(1);
-    expect(hydrated[0]?.events).toHaveLength(2);
-    expect(hydrated[0]?.events[0]).toEqual(evt1);
-    expect(hydrated[0]?.events[1]).toEqual(evt2);
+    expect(hydrated[0]?.events).toEqual([]);
+    expect(loadRecentEvents("sess-1")).toEqual([expect.objectContaining(evt1), expect.objectContaining(evt2)]);
   });
 
-  it("hydrate caps restored events at MAX_BUFFERED_EVENTS, returning the most recent in chronological order", () => {
+  it("on-demand history caps events at MAX_BUFFERED_EVENTS in chronological order", () => {
     persistSession(makeSession());
     const overflow = MAX_BUFFERED_EVENTS + 25;
     for (let i = 0; i < overflow; i++) {
@@ -451,7 +450,8 @@ describe("session-persist integration", () => {
       });
     }
     const hydrated = hydrateSessionsFromDb();
-    const events = hydrated[0]?.events ?? [];
+    expect(hydrated[0]?.events).toEqual([]);
+    const events = loadRecentEvents("sess-1");
     expect(events).toHaveLength(MAX_BUFFERED_EVENTS);
     // The first restored event is the (overflow - MAX) th written.
     const firstMessage = events[0]?.message as { i: number };

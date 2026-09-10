@@ -1,6 +1,7 @@
 import type { WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
+import { canvasRunStreamPatch } from "./canvas-run-stream.ts";
 
 export function reconcileLegacyCanvasLeaders(
   nodes: readonly CanvasNode[], items: readonly WorkItemSnapshot[],
@@ -18,7 +19,7 @@ export function reconcileLegacyCanvasLeaders(
       const bound = itemById.get(data.workItemId);
       if (!bound || data.workItemSnapshot === bound) return [];
       return [{ nodeId: node.id, data: { ...data, currentRunKey: bound.currentRunKey,
-        workItemSnapshot: bound, sessionKey: bound.currentRunKey ?? data.sessionKey } }];
+        workItemSnapshot: bound, ...canvasRunStreamPatch(data.sessionKey, bound.currentRunKey, data) } }];
     }
     if (!data.sessionKey) return [];
     const item = itemByRun.get(data.sessionKey)
@@ -26,6 +27,6 @@ export function reconcileLegacyCanvasLeaders(
     if (!item) return [];
     return [{ nodeId: node.id, data: { ...data, workItemId: item.id,
       currentRunKey: item.currentRunKey, workItemSnapshot: item,
-      sessionKey: item.currentRunKey ?? data.sessionKey } }];
+      ...canvasRunStreamPatch(data.sessionKey, item.currentRunKey, data) } }];
   });
 }

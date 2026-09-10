@@ -1,4 +1,4 @@
-import { SimpleMarkdown } from "./SimpleMarkdown.tsx";
+import { AgentMessageText } from "./AgentMessageText.tsx";
 /**
  * StreamingBubble – renders partial assistant text with a blinking cursor.
  * Shared across ClaudeSessionNode, MinionNode, and LeaderNode.
@@ -62,7 +62,7 @@ export function StreamingBubble({
         position: "relative",
       }}
     >
-      {text ? <SimpleMarkdown text={text} /> : "\u00A0"}
+      {text ? <AgentMessageText text={text} /> : "\u00A0"}
       <span
         style={{
           display: "inline-block",

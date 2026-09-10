@@ -40,7 +40,7 @@ describe("sync_session", () => {
       status: "running",
       timestamp: 1,
     };
-    h.host.eventBuffer.push(event);
+    h.host.bufferEvent(event);
 
     syncSession(h.ctx, cmd({ type: "sync_session" }), h.ws);
 
@@ -60,7 +60,7 @@ describe("sync_session", () => {
       runKey: "leader-1", workItemId: "work-1", runKind: "child",
       parentRunKey: "root-run", taskId: "task-1",
     });
-    expect(env["events"]).toEqual([event]);
+    expect(env["events"]).toEqual([expect.objectContaining(event)]);
   });
 
   it("sync_response carries the host's harness and capabilities", () => {

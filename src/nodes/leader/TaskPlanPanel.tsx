@@ -1,3 +1,4 @@
+import { AgentMessageText } from "../../components/AgentMessageText.tsx";
 import { MinionsIcon, type MinionsIconName } from "../../components/MinionsIcon.tsx";
 import { useState } from "react";
 import { createPortal } from "react-dom";
@@ -427,10 +428,10 @@ export function TaskPlanPanel({
                             overflowY: "auto",
                           }}
                         >
-                          {task.result ??
+                          <AgentMessageText text={task.result ??
                             (task.progress && task.progress.length > 0
                               ? task.progress.slice(-5).join("\n")
-                              : task.sessionSummary)}
+                              : task.sessionSummary) ?? ""} />
                         </div>
                       )}
                     </div>,

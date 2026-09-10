@@ -29,6 +29,7 @@ function invocationDb(host: SessionHost): Database.Database | null {
 export function persistInvocationBeforeHarnessOpen(
   host: SessionHost,
   at = Date.now(),
+  primaryWake = false,
 ): void {
   if (!host.workItemId) return;
   const db = persistenceDb();
@@ -37,6 +38,7 @@ export function persistInvocationBeforeHarnessOpen(
     runKey: host.runKey,
     providerId: host.harnessName,
     startedAt: at,
+    primaryWake,
   });
   host.providerInvocationGeneration = row.provider_generation;
 }

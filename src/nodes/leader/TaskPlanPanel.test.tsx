@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TaskPlanPanel } from "./TaskPlanPanel.tsx";
 import type { TaskPlanItem } from "./types.ts";
@@ -21,6 +21,15 @@ function item(taskId: string, status: TaskPlanItem["status"]): TaskPlanItem {
 }
 
 describe("TaskPlanPanel", () => {
+  it("renders a JSON summary and supporting fields in the result tooltip", () => {
+    render(<TaskPlanPanel taskPlan={[{ ...item("audit", "completed"),
+      result: JSON.stringify({ summary: "Audit finished", tests: ["Build passed"] }) }]}
+      expanded onToggle={vi.fn()} />);
+    fireEvent.mouseEnter(screen.getByText("audit"));
+    expect(screen.getByText("Audit finished")).toBeInTheDocument();
+    expect(screen.getByText("Build passed")).toBeInTheDocument();
+  });
+
   it("reports successful and unsuccessful terminal outcomes separately", () => {
     render(
       <TaskPlanPanel

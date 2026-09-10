@@ -1,5 +1,5 @@
 import { memo, useCallback, type KeyboardEvent, type MouseEvent } from "react";
-import { SimpleMarkdown } from "../../../components/SimpleMarkdown.tsx";
+import { AgentMessageText } from "../../../components/AgentMessageText.tsx";
 import { parseMessageChunks } from "../../../message-chunks.ts";
 
 /**
@@ -58,7 +58,7 @@ export const MessageChunkView = memo(function MessageChunkView({
       onKeyDown={handleKeyDown}
     >
       <span aria-hidden="true" className="message-chunk__rail" />
-      <SimpleMarkdown text={chunk.rawText} />
+      <AgentMessageText text={chunk.rawText} />
     </div>
   );
 });

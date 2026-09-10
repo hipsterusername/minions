@@ -23,7 +23,9 @@ import {
 } from "./work-item-service-sqlite.ts";
 import { createWorkItemRuntimeLifecycle } from "./work-item-runtime-lifecycle.ts";
 import { queueWorkItemGuidance } from "./work-item-continuation.ts";
+import { createWakeDeliveryStore, WakeDeliveryError } from "./wake-delivery-store.ts";
 import { randomUUID } from "node:crypto";
+import { sandboxPolicyForMinion } from "./harness/sandbox-policy.ts";
 
 /** Stable across restarts and processes; request IDs are globally scoped. */
 export function workItemRequestKey(
@@ -52,6 +54,7 @@ export interface WorkItemBootstrapOptions {
 }
 
 export interface WorkItemBootstrapResult {
+  wakeDelivery: ReturnType<typeof createWakeDeliveryStore>;
   workItems: SqliteWorkItemService;
   backfill: LegacyBackfillResult;
   recovery: BootRecoveryResult;
@@ -93,6 +96,9 @@ export function bootstrapWorkItemRuntime(
     if (child && (!input.taskId || !parent)) {
       throw new Error(`Child run ${input.runKey} requires a live parent and task`);
     }
+    const sandboxPolicy = child
+      ? sandboxPolicyForMinion(parent!.sandboxPolicy?.requested, input.sandboxPolicy)
+      : input.sandboxPolicy;
     const sessionOptions: StartSessionOptions = {
       sessionKey: input.runKey,
       invocationKind: input.invocationKind,
@@ -116,7 +122,7 @@ export function bootstrapWorkItemRuntime(
       ...(input.thinkingConfig ? { thinkingConfig: input.thinkingConfig } : {}),
       ...(input.harness ? { harness: input.harness } : {}),
       ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}),
-      ...(input.sandboxPolicy ? { sandboxPolicy: input.sandboxPolicy } : {}),
+      ...(sandboxPolicy ? { sandboxPolicy } : {}),
       ...(input.executorClass ? { executorClass: input.executorClass } : {}),
       ...(input.toolAllowlist ? { toolAllowlist: input.toolAllowlist } : {}),
       ...(input.skillIds ? { skillIds: input.skillIds } : {}),
@@ -171,7 +177,10 @@ export function bootstrapWorkItemRuntime(
     await launchRun(input);
   };
   const ensureRunContinued = async (input: WorkItemInvocation): Promise<void> => {
-    if (isRunLive(input.runKey)) return;
+    if (isRunLive(input.runKey)) {
+      if (input.continuitySource === "system") throw new WakeDeliveryError("transient", "Wake run became busy");
+      return;
+    }
     await continueRun(input);
   };
 
@@ -225,6 +234,7 @@ export function bootstrapWorkItemRuntime(
   });
   return {
     workItems,
+    wakeDelivery: createWakeDeliveryStore(options.db),
     backfill,
     recovery,
     runtimeLifecycle,

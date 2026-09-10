@@ -9,8 +9,8 @@ suggested_tests: [ src/use-socket.test.tsx, src/App.dom.test.tsx, src/use-work-i
 steps:
   - Reconnect the WebSocket and safely flush queued outbound commands.
   - Relist sessions and WorkItems, then sync each mounted session from persisted host truth.
-  - Restore every session and transcript before reconciling parent tasks against child terminal evidence.
-  - Preserve blocked children, rebuild durable wait timers, and replay only unacknowledged attention.
+  - Restore the complete session graph and durable activity, continuity, wait and task facts before reconciling children; load transcript bodies on demand from bounded history pages.
+  - Preserve blocked children and eligible waits; suppress sealed or superseded wakes, deduplicate delivery, and bound retries without acknowledging undelivered attention.
   - Reattach UI bindings and resume incomplete continuity without redoing terminal tasks or duplicating keyed creation.
 freshness:
   class: code_coupled

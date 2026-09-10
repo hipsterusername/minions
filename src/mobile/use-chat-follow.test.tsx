@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { ChatFollowMemory } from "../use-chat-follow.ts";
 import { useChatFollow } from "./use-chat-follow.ts";
 import { ChatFollow } from "./ChatFollow.tsx";
 
@@ -8,8 +9,8 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(1000);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
 });
-function Feed({ activity = "first" }: { activity?: string }) {
-  const follow = useChatFollow("session", activity);
+function Feed({ activity = "first", memory }: { activity?: string; memory?: ChatFollowMemory }) {
+  const follow = useChatFollow("session", activity, true, memory);
   return <><div ref={follow.feedRef} onScroll={follow.onScroll} tabIndex={-1} data-testid="feed">Earlier message</div>
     {follow.hasNewActivity && <ChatFollow onResume={follow.resume} />}<input aria-label="Composer" /></>;
 }
@@ -54,4 +55,16 @@ it("keeps a paused offset on keyboard/viewport resize and uses immediate scrolli
   fireEvent.click(screen.getByRole("button", { name: /New activity/ }));
   expect(feed.scrollTop).toBe(1000);
   expect(scrollTo).not.toHaveBeenCalled();
+});
+
+it("restores the paused reading position when a session is reopened", () => {
+  const memory: ChatFollowMemory = {};
+  const view = render(<Feed memory={memory} />);
+  const feed = screen.getByTestId("feed");
+  feed.scrollTop = 250;
+  fireEvent.scroll(feed);
+  view.unmount();
+  expect(memory).toEqual({ following: false, position: 250 });
+  render(<Feed memory={memory} activity="new messages" />);
+  expect(screen.getByTestId("feed").scrollTop).toBe(250);
 });

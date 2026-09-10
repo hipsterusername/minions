@@ -5,6 +5,7 @@ import type { ChangeMode } from "../../shared/work-item-lifecycle.ts";
 import { randomUuid } from "../random-id.ts";
 import { useWorktreeIntegration } from "../use-worktree-integration.ts";
 import { WorktreeIntegrationControls } from "../WorktreeIntegrationControls.tsx";
+import { LiveChangesPanel } from "../LiveChangesPanel.tsx";
 import type { ServerMessage, SocketSubscribe } from "../use-socket.ts";
 import {
   fileStatusSymbol,
@@ -14,6 +15,8 @@ import {
 } from "./mobile-approvals.ts";
 
 interface ReviewChangesScreenProps {
+  embedded?: boolean;
+  approvalPending?: boolean;
   sessionKey: string;
   workItemId?: string | null | undefined;
   changeMode?: ChangeMode | undefined;
@@ -40,25 +43,23 @@ export function ReviewChangesScreen({
   workItemId,
   ...props
 }: ReviewChangesScreenProps) {
-  if (workItemId && changeMode !== "worktree") {
+  const Container = props.embedded ? "section" : "main";
+  if (changeMode === "live" || (workItemId && changeMode !== "worktree")) {
     return (
-      <main className="mob-review" aria-label="Live changes">
-        <header className="mob-chat-header">
+      <Container className="mob-review" aria-label="Workspace changes">
+        {props.embedded ? null : <header className="mob-chat-header">
           <button className="mob-icon-button" type="button" onClick={props.onClose} aria-label="Close">
             ×
           </button>
           <div className="mob-chat-title">
-            <span>Live mode</span>
+            <span>Workspace changes</span>
             <h1>{props.title ?? props.sessionKey}</h1>
           </div>
-        </header>
+        </header>}
         <section className="mob-review-body">
-          <div className="mob-review-summary">
-            <h2>No approval required</h2>
-            <p>Live changes are applied directly to the current working tree.</p>
-          </div>
+          <LiveChangesPanel sessionKey={props.sessionKey} send={props.send} subscribe={props.subscribe} />
         </section>
-      </main>
+      </Container>
     );
   }
   return <WorktreeReviewChangesScreen {...props} workItemId={workItemId} changeMode={changeMode} />;
@@ -73,8 +74,11 @@ function WorktreeReviewChangesScreen({
   onRequestChanges,
   summary,
   title,
+  embedded,
+  approvalPending = false,
 }: ReviewChangesScreenProps) {
-  const [requestId] = useState(makeRequestId);
+  const Container = embedded ? "section" : "main";
+  const [requestId, setRequestId] = useState(makeRequestId);
   const [diff, setDiff] = useState<DetailedDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [requestingChanges, setRequestingChanges] = useState(false);
@@ -135,6 +139,11 @@ function WorktreeReviewChangesScreen({
     });
   }, [onClose, requestId, sessionKey, subscribe, workItemId]);
 
+  const emptyChanges = diff !== null && diff.filesChanged === 0 && diff.commits.length === 0;
+  // Changes is now browsable without an approval request. Keep legacy merge
+  // actions scoped to a real pending decision; canonical integration has its
+  // own revision and gate validation in WorktreeIntegrationControls.
+  const showActions = !embedded || approvalPending || Boolean(workItemId && diff && !emptyChanges);
   const commitsLabel = useMemo(() => {
     if (!diff) return "";
     return `${diff.commits.length} ${diff.commits.length === 1 ? "commit" : "commits"}`;
@@ -156,8 +165,8 @@ function WorktreeReviewChangesScreen({
   }
 
   return (
-    <main className="mob-review" aria-label="Review changes">
-      <header className="mob-chat-header">
+    <Container className="mob-review" aria-label="Review changes">
+      {embedded ? null : <header className="mob-chat-header">
         <button className="mob-icon-button" type="button" onClick={onClose} aria-label="Close review">
           ×
         </button>
@@ -165,11 +174,11 @@ function WorktreeReviewChangesScreen({
           <span>Review changes</span>
           <h1>{title ?? sessionKey}</h1>
         </div>
-      </header>
+      </header>}
 
       <section className="mob-review-body">
         <div className="mob-review-summary">
-          <h2>Changes ready for review</h2>
+          <h2>{emptyChanges ? "No changes to review" : "Session changes"}</h2>
           {summary ? <p>{summary}</p> : null}
           {diff ? (
             <p className="mob-review-stat">
@@ -181,7 +190,11 @@ function WorktreeReviewChangesScreen({
         {!diff && !error ? (
           <div className="mob-review-loading" role="status">Loading diff...</div>
         ) : null}
-        {error ? <div className="mob-review-error" role="alert">{error}</div> : null}
+        {error ? <div className="mob-review-error" role="alert">{error}
+          <button className="mob-header-action" type="button" onClick={() => {
+            setError(null); setDiff(null); setRequestId(makeRequestId());
+          }}>Retry loading changes</button>
+        </div> : null}
 
         {diff ? (
           <>
@@ -268,7 +281,7 @@ function WorktreeReviewChangesScreen({
         </section> : null}
       </section>
 
-      <footer className="mob-review-actions">
+      {showActions ? <footer className="mob-review-actions">
         {requestingChanges ? (
           <form
             className="mob-review-feedback"
@@ -327,7 +340,7 @@ function WorktreeReviewChangesScreen({
             Discard
           </button> : null}
         </div>
-      </footer>
-    </main>
+      </footer> : null}
+    </Container>
   );
 }

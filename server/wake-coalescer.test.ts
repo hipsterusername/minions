@@ -74,6 +74,26 @@ describe("wake coalescer", () => {
     vi.useRealTimers();
   });
 
+  it("preserves attention while a leader stays busy longer than the retry budget", async () => {
+    const deps = makeDeps();
+    deps.resumeWorkItemRun = vi.fn().mockResolvedValue(undefined);
+    const host = makeLeader();
+    host.workItemId = "work-1";
+    host.status = "running";
+    const delivered = vi.fn();
+    requestCoalescedWake(host, deps, {
+      immediate: true, idempotencyKey: "long-active-turn", onDelivered: delivered,
+      opts: { sessionKey: host.id, cwd: host.cwd, prompt: "A child needs attention" },
+    });
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(deps.resumeWorkItemRun).not.toHaveBeenCalled();
+    expect(delivered).not.toHaveBeenCalled();
+    host.status = "idle";
+    await vi.advanceTimersByTimeAsync(MIN_WAKE_RESUME_INTERVAL_MS);
+    expect(deps.resumeWorkItemRun).toHaveBeenCalledOnce();
+    expect(delivered).toHaveBeenCalledOnce();
+  });
+
   it("coalesces multiple wake triggers inside the window into one resume", async () => {
     const startChildSession = vi.fn();
     const deps = makeDeps(startChildSession);
@@ -172,6 +192,56 @@ describe("wake coalescer", () => {
 
     expect(startChildSession).toHaveBeenCalledOnce();
     expect(startChildSession.mock.calls[0]![0].prompt).toBe("first");
+  });
+
+  it("deduplicates an in-flight keyed wake and fences late failure after cancellation", async () => {
+    const deps = makeDeps();
+    let reject!: (error: unknown) => void;
+    deps.resumeWorkItemRun = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+    const host = makeLeader(); host.workItemId = "work-1"; host.runKind = "primary";
+    const request = { immediate: true, idempotencyKey: "same", opts: {
+      sessionKey: host.id, cwd: host.cwd, prompt: "once",
+    } };
+    for (let i = 0; i < 1000; i++) requestCoalescedWake(host, deps, request);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.resumeWorkItemRun).toHaveBeenCalledOnce();
+    cancelQueuedWaitResume(host);
+    reject(Object.assign(new Error("busy"), { code: "SQLITE_BUSY" }));
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(deps.resumeWorkItemRun).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("never dispatches or acknowledges obsolete canonical wakes", async () => {
+    const deps = makeDeps();
+    deps.resumeWorkItemRun = vi.fn();
+    deps.wakeDelivery = { eligibility: () => "obsolete", get: () => undefined, put: vi.fn() };
+    const host = makeLeader(); host.workItemId = "work-1"; host.runKind = "primary";
+    const onDelivered = vi.fn();
+    requestCoalescedWake(host, deps, { immediate: true, onDelivered, opts: {
+      sessionKey: host.id, cwd: host.cwd, prompt: "old",
+    } });
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(deps.resumeWorkItemRun).not.toHaveBeenCalled();
+    expect(onDelivered).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("retains a bounded local receipt for a synchronously delivered keyed wake", async () => {
+    const deps = makeDeps(); const host = makeLeader();
+    for (let i = 0; i < 1000; i++) requestCoalescedWake(host, deps, {
+      immediate: true, idempotencyKey: "one-event", opts: { sessionKey: host.id, cwd: host.cwd, prompt: "once" },
+    });
+    await vi.runAllTimersAsync();
+    expect(deps.startChildSession).toHaveBeenCalledOnce();
+  });
+
+  it("lets an immediate event advance the coalescing window", () => {
+    const deps = makeDeps(); const host = makeLeader();
+    wake(host, deps, "ordinary"); wake(host, deps, "urgent", true);
+    expect(deps.startChildSession).toHaveBeenCalledOnce();
+    expect(vi.mocked(deps.startChildSession).mock.calls[0]![0].prompt).toContain("urgent");
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("caps each task digest excerpt with a truncation marker", () => {

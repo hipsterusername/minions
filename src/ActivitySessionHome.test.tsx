@@ -90,6 +90,14 @@ describe("selectRelevantSessions", () => {
 });
 
 describe("ActivitySessionHome", () => {
+  it("invites users to open a structured report instead of showing evidence in the preview", () => {
+    render(<ActivitySessionHome sessions={[session({ taskName: "Audit changes",
+      lastActivity: JSON.stringify({ summary: "Audit finished", nextSteps: ["Review findings"] }) })]}
+      onOpenSession={() => {}} onLaunch={() => {}} />);
+    expect(document.querySelector(".act-session-feature__body p"))
+      .toHaveTextContent("Agent report available. Open session to view details.");
+  });
+
   it("uses neutral copy when every summary candidate repeats the session title", () => {
     render(
       <ActivitySessionHome

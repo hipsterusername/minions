@@ -1,3 +1,5 @@
+import { persistenceDb } from "../session-persist.ts";
+import { readHistoryPage } from "../session-history.ts";
 /**
  * sync_session — return a snapshot of one session plus its buffered events.
  *
@@ -53,6 +55,8 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
     // Keep session recovery available even when workspace registry repair is required.
   }
 
+  const db = persistenceDb();
+  const page = db ? readHistoryPage(db, host.id) : { events: host.eventBuffer };
   unicastToSession(ws, cmd.sessionKey, {
     type: "sync_response",
     sessionKey: cmd.sessionKey,
@@ -99,7 +103,7 @@ export const syncSession: CommandHandler = (ctx, cmd, ws) => {
             sessionKey: t.minionSessionKey,
           }))
       : [],
-    events: host.eventBuffer,
+    ...page,
   });
 
   // Re-emit render state so the RenderNode subscription picks it up on

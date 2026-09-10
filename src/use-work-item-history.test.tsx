@@ -139,6 +139,21 @@ describe("useWorkItemHistory", () => {
 });
 
 describe("buildUnifiedWorkItemMessages", () => {
+  it.each([
+    { taskPlan: [{ taskId: "node-opaque-guid", title: "Audit session recovery" }], label: "Child run · Audit session recovery" },
+    { taskPlan: [], label: "Child run" },
+  ])("uses a readable fallback without linking an unavailable node: $label", ({ taskPlan, label }) => {
+    const messages = buildUnifiedWorkItemMessages({
+      runs: [{ ...run("child", 10, 1), runKind: "child", runNumber: null,
+        parentRunKey: "run-1", taskId: "node-opaque-guid", attemptId: "attempt-1", attemptNumber: 1 }],
+      streams: {}, currentRunKey: "run-2", currentMessages: [],
+      graphNodes: [{ id: "unrelated-node", title: "Another task" }],
+      taskPlan, onInspectNode: vi.fn(),
+    });
+    expect(messages[0]).toMatchObject({ label, content: `${label} · completed` });
+    expect(messages[0]).not.toHaveProperty("onInspect");
+  });
+
   it("keeps the current conversation visible before its ledger entry arrives", () => {
     const first = emptySessionStreamState("run-1");
     first.messages = [{ id: "old", role: "assistant", content: "Earlier work", timestamp: 11 }];
@@ -163,6 +178,8 @@ describe("buildUnifiedWorkItemMessages", () => {
     expect(messages.map((message) => message.content)).toEqual([
       "Iteration 1 · completed", "Earlier work", "Iteration 2 · Active now", "Current work",
     ]);
+    expect(messages[0]).toMatchObject({ kind: "run-boundary", label: "Iteration 1" });
+    expect(messages[0]).not.toHaveProperty("role");
   });
 
   it("selects every previous primary iteration newest-first without child runs", () => {

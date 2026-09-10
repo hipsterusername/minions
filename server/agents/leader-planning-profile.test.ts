@@ -16,6 +16,7 @@ describe("Leader planning profile", () => {
     expect(profile.taskToolNames).toContain("assign_task");
     expect(profile.taskToolNames).toContain("message_task");
     expect(profile.planningToolNames).toEqual([
+      "list_minion_context_blocks", "preview_minion_context",
       "initialize_graph_document", "upsert_graph_node", "remove_graph_node",
       "upsert_graph_edge", "remove_graph_edge", "get_graph_document", "submit_graph_document",
       "submit_graph_plan", "submit_dialectic_graph", "get_graph_plan", "start_graph_plan",

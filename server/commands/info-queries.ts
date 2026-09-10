@@ -174,11 +174,7 @@ function newestLiveUsageHost(hosts: SessionHost[], harnessName: string): Session
 }
 
 function lastActivityAt(host: SessionHost): number {
-  for (let i = host.eventBuffer.length - 1; i >= 0; i -= 1) {
-    const timestamp = host.eventBuffer[i]?.timestamp;
-    if (typeof timestamp === "number") return timestamp;
-  }
-  return 0;
+  return host.historyFacts.lastActivityAt ?? 0;
 }
 
 export const getMcpServerStatus: CommandHandler = (ctx, cmd, ws) => {

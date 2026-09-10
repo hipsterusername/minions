@@ -1,7 +1,6 @@
 import { SkillIcon } from "../../components/SkillIcon.tsx";
-import { useContext, useMemo, type KeyboardEvent, type RefObject } from "react";
+import { useContext, useMemo, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import {
-  FolderGit2,
   Settings2,
   Sparkles,
 } from "lucide-react";
@@ -100,7 +99,7 @@ export function ActivityLaunchForm({
   pending = data.status === "creating",
   unavailableReason,
   textareaRef,
-  projectPath,
+  workspaceControl,
   onInputChange,
   onKeyDown,
   onSubmit,
@@ -116,7 +115,7 @@ export function ActivityLaunchForm({
   pending?: boolean;
   unavailableReason?: string | undefined;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  projectPath?: string;
+  workspaceControl?: ReactNode;
   onInputChange: (value: string) => void;
   onKeyDown: (event: KeyboardEvent) => void;
   onSubmit: () => void;
@@ -243,17 +242,7 @@ export function ActivityLaunchForm({
                   <small>Adjust each setting in place</small>
                 </span>
               </span>
-              {projectPath ? (
-                <div className="leader-launch-project">
-                  <FolderGit2 size={14} aria-hidden />
-                  <span>
-                    <strong title={projectPath}>
-                      {projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? projectPath}
-                    </strong>
-                    <small title={projectPath}>{projectPath}</small>
-                  </span>
-                </div>
-              ) : null}
+              {workspaceControl}
             </div>
 
             <div className="leader-launch-config-grid">

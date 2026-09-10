@@ -3,6 +3,32 @@ import { describe, expect, it, vi } from "vitest";
 import { SandboxPolicyControls } from "./SandboxPolicyControls.tsx";
 
 describe("SandboxPolicyControls", () => {
+  it("distinguishes legacy Leader-only access from explicit Minion access", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<SandboxPolicyControls onChange={onChange} policy={{
+      filesystemScope: "unrestricted", approvalPolicy: "never",
+    }} />);
+    const select = screen.getByLabelText("Sandbox file access");
+    expect(select).toHaveDisplayValue("Full Host - Leader Only");
+    fireEvent.change(select, { target: { value: "unrestricted-with-minions" } });
+    const extended = { filesystemScope: "unrestricted", approvalPolicy: "never",
+      fullHostScope: "leader-and-minions" } as const;
+    expect(onChange).toHaveBeenLastCalledWith(extended);
+    rerender(<SandboxPolicyControls onChange={onChange} policy={extended} />);
+    expect(select).toHaveDisplayValue("Full Host - Leader + Minions");
+    fireEvent.change(screen.getByLabelText("Sandbox approval policy"), { target: { value: "on-failure" } });
+    expect(onChange).toHaveBeenLastCalledWith({ ...extended, approvalPolicy: "on-failure" });
+    fireEvent.change(select, { target: { value: "workspace-write" } });
+    expect(onChange).toHaveBeenLastCalledWith({ filesystemScope: "workspace-write", approvalPolicy: "never" });
+    fireEvent.change(select, { target: { value: "unrestricted" } });
+    expect(onChange).toHaveBeenLastCalledWith({ ...extended, fullHostScope: "leader-only" });
+  });
+
+  it("disables both full host options when the harness cannot enforce them", () => {
+    render(<SandboxPolicyControls onChange={vi.fn()} support={{ filesystem: ["workspace-write"], approval: true }} />);
+    expect(screen.getByRole("option", { name: "Full Host - Leader Only" })).toBeDisabled();
+    expect(screen.getByRole("option", { name: "Full Host - Leader + Minions" })).toBeDisabled();
+  });
   it("edits filesystem and approval axes independently", () => {
     const onChange = vi.fn();
     render(<SandboxPolicyControls onChange={onChange} />);

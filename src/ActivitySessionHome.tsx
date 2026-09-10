@@ -1,3 +1,4 @@
+import { agentMessagePreview } from "./agent-message-format.ts";
 import { ArrowRight, ChevronRight, Plus } from "lucide-react";
 
 import type { MobileSessionInfo } from "./mobile/mobile-selectors.ts";
@@ -87,7 +88,7 @@ function sessionSummary(session: MobileSessionInfo): string {
     const label = sessionRelevanceLabel(session).toLocaleLowerCase();
     return `This session is ${label}. Open it to review the latest context and continue the work.`;
   }
-  const flat = source.replace(/\s+/g, " ");
+  const flat = agentMessagePreview(source).replace(/\s+/g, " ");
   if (flat.length <= SUMMARY_LIMIT) return flat;
   return `${flat.slice(0, SUMMARY_LIMIT - 1).trimEnd()}…`;
 }

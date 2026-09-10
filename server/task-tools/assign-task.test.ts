@@ -122,6 +122,17 @@ describe("assign_task", () => {
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
+  it("routes explicit instructions and references separately for direct assignments", async () => {
+    await createAssignTaskToolDef(harness.ctx).handler({ taskId: "color", title: "Color", priority: "low",
+      description: "Return red", inheritSkills: false, skillIds: [], include_canvas_context: false,
+      context: { profile: "compact", instructions: ["One word only"],
+        references: [{ id: "example", title: "Example", content: "REFERENCE_DATA" }] } });
+    expect(harness.spawns[0]!.systemPrompt).toContain("One word only");
+    expect(harness.spawns[0]!.systemPrompt).not.toContain("REFERENCE_DATA");
+    expect(harness.spawns[0]!.prompt).toContain("REFERENCE_DATA");
+    expect(harness.spawns[0]!.skillIds).toEqual([]);
+  });
+
   it.each([["src", "src/child.ts"], ["src/**/*.ts", "src/deep/child.ts"], ["./src/a.ts", "src/a.ts"]])(
     "rejects overlapping directory, glob, and normalized scopes %s / %s", async (first, second) => {
       await callAssign(harness.ctx, { taskId:"owner",title:"Owner",description:"work",priority:"high",ownedPaths:[first] });

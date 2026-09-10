@@ -84,6 +84,21 @@ function setup() {
 }
 
 describe("TaskGraphPlanningCoordinator", () => {
+  it("keeps full context in the revision and returns only metadata in plan inspections", async () => {
+    const { coordinator, service } = setup();
+    const plan = semanticPlan();
+    plan.steps[0]!.context = { profile: "compact", instructions: ["INSTRUCTION_BODY"],
+      references: [{ id: "sample", title: "Sample", content: "REFERENCE_BODY" }] };
+    const ready = await coordinator.submit({ workItemId: "work", primaryRunKey: "primary",
+      mode: "plan", requestId: "context-preview", baseProposalRevision: null, plan });
+    expect(ready.steps[0]!.contextSummary).toMatchObject({ profile: "compact", instructionCount: 1,
+      referenceIds: ["sample"] });
+    expect(JSON.stringify(ready)).not.toContain("INSTRUCTION_BODY");
+    expect(JSON.stringify(ready)).not.toContain("REFERENCE_BODY");
+    expect(service.repo.getRevision(ready.materializedRevisionId!).nodes[0]!.context)
+      .toEqual(plan.steps[0]!.context);
+  });
+
   it("persists a reviewable proposal, materializes a revision, and starts it on approval", async () => {
     const { db, coordinator, transport } = setup();
     const ready = await coordinator.submit({ workItemId: "work", primaryRunKey: "primary",

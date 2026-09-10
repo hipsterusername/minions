@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { createMinionContextTools } from "./context-tools.ts";
 import { leaderProcedurePointer } from "../../shared/leader-procedures.ts";
 import {
   semanticTaskGraphPlanSchema,
@@ -98,6 +99,8 @@ export function createTaskGraphPlanningTools(input: {
         : snapshot.state === "running" ? "graph_authoring" : "adjudication") };
   };
   return [
+    ...createMinionContextTools({ resolveAuthority: () => input.coordinator.options
+      .resolveSourceAuthority(input.workItemId, input.primaryRunKey) }),
     {
       name: "initialize_graph_document",
       description: "Initialize or replace the session-local semantic graph draft at the exact document revision. The optional pattern and problemSignature fields record reviewed authoring provenance; iteration metadata bounds successor episodes. The server applies all omitted plan defaults and starts with no nodes or edges.",

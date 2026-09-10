@@ -9,6 +9,7 @@
  * being created — clearing a live conversation is undefined behavior.
  */
 
+import { resetHistoryFacts } from "../session-history-host.ts";
 import { clearSessionEvents } from "../session-persist.ts";
 import { deleteHtmlArtifactsForSession } from "../html-artifact-store.ts";
 import { serverLogger } from "../logging.ts";
@@ -40,6 +41,7 @@ export const clearSession: CommandHandler = (ctx, cmd, ws) => {
   host.persist();
 
   clearSessionEvents(cmd.sessionKey);
+  resetHistoryFacts(host);
 
   // Clearing a session wipes its history; drop its temporary HTML artifacts
   // too. Fire-and-forget — cleanup must not block the clear acknowledgement.

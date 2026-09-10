@@ -35,6 +35,7 @@ export interface SessionHostDeps {
     /** Called after durable allocation and before provider launch. */
     onAllocated?: (sessionKey: string) => void;
   }) => void | Promise<{ sessionKey: string; harness: string; model: string; permissionMode: string }>;
+  wakeDelivery?: import("./wake-delivery-store.ts").WakeDeliveryStore;
   resumeWorkItemRun?: (input: { workItemId: string; runKey: string; prompt: string; requestId: string; continuitySource?: "system" }) => void | Promise<void>;
   continueWorkItemChild?: (input: { workItemId: string; runKey: string; prompt: string; requestId: string }) => void | Promise<void>;
   cleanupLiveEditRun?: (runKey: string) => void;

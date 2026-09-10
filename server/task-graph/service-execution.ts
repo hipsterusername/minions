@@ -7,7 +7,7 @@ import { runSnapshot } from "../work-item-snapshots.ts";
 import { TaskGraphConflictError,TaskGraphValidationError } from "./errors.ts";import { sandboxPolicyForTaskGraphNode } from "./execution-policy.ts";
 import type { DispatchRecord } from "./recovery.ts";
 import { scopedContextForNode, scopedSkillIds } from "./context-sources.ts";import { affinityResumeForNode,humanGuidanceForNode } from "./dispatch-context.ts";
-import { renderTaskGraphNodePrompt } from "./node-prompt.ts";
+import { renderTaskGraphNodePrompts } from "./node-prompt.ts";
 import { steeringInstructions } from "./service-controls.ts";
 import {recoveryDraftForAttempt,resolvedInputArtifacts} from "./staging-recovery.ts";
 import { onVerifierSealed,recoverTaskGraphVerifications } from "./service-verification.ts";import {parseVerificationTaskVerdict} from "./verification-verdict.ts";
@@ -220,7 +220,7 @@ async function dispatch(service:TaskGraphService,record:DispatchRecord):Promise<
       harness:affinity?.harness??node.allowedHarnesses[0],...((affinity?.model??node.model)?{model:affinity?.model??node.model}:{}),
       ...(affinity?{resumeId:affinity.resumeId,invocationKind:"resume_open_run" as const}:{}),executorClass:node.executorClass,
       toolAllowlist:node.allowedTools,skillIds:scopedSkillIds(skillSource,scopedContext),skillSnapshotId:skillSource.skillSnapshotId,...(sandboxPolicy?{sandboxPolicy}:{}),
-      prompt:renderTaskGraphNodePrompt(spec,node,record.attemptId,Number(attempt.attempt_number),
+      ...renderTaskGraphNodePrompts(spec,node,record.attemptId,Number(attempt.attempt_number),
         String(run.source_snapshot_id),inputArtifacts,steering,
         scopedContext,recoveryDraft,humanGuidanceForNode(service,record.runId,node.id)),
     });

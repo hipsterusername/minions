@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createGraphFixture } from '../../src/task-graph/fixtures.ts';
 
 test.use({ isMobile: true, hasTouch: true });
 
@@ -6,7 +7,7 @@ test.use({ isMobile: true, hasTouch: true });
 // agents or changing a user's projects through the development server.
 const project = { id: 'mobile-layout', path: '/workspace/mobile-layout', name: 'Mobile layout workspace', hasSidecar: true, lastOpened: '2026-09-05T00:00:00Z' };
 const sessions = [
-  { sessionKey: 'layout-running', sessionId: null, role: 'leader', cwd: project.path, status: 'running', taskName: 'Improve mobile layouts and usability', model: 'gpt-6', totalCost: 1.24 },
+  { workItemId: 'layout-work', sessionKey: 'layout-running', sessionId: null, role: 'leader', cwd: project.path, status: 'running', taskName: 'Improve mobile layouts and usability', model: 'gpt-6', totalCost: 1.24 },
   { sessionKey: 'layout-waiting', sessionId: null, role: 'leader', cwd: project.path, status: 'waiting', taskName: 'Review authentication changes', totalCost: 0.82 },
 ];
 
@@ -21,7 +22,12 @@ async function openWorkspace(page) {
   });
   await page.routeWebSocket('**/ws*', socket => socket.onMessage(raw => {
     const message = JSON.parse(raw);
+    if (message.type === 'get_task_graph_snapshot') {
+      const snapshot = createGraphFixture(10);
+      socket.send(JSON.stringify({ topic: 'work-item:layout-work', type: 'task_graph_snapshot', cause: 'navigation-test', workItemId: 'layout-work', snapshot, runId: snapshot.graphRunId, revision: snapshot.revision, timestamp: 1 }));
+    }
     if (message.type === 'list_sessions') socket.send(JSON.stringify({ topic: 'global', type: 'session_list', sessions }));
+    if (message.type === 'list_work_items') socket.send(JSON.stringify({ topic: 'global', type: 'work_item_response', command: message.type, requestId: message.requestId, success: true, result: { projectId: project.id, items: [], nextCursor: null } }));
     if (message.type === 'list_harnesses') socket.send(JSON.stringify({ topic: 'global', type: 'harness_list', harnesses: [] }));
   }));
   await page.goto('/m');
@@ -34,8 +40,7 @@ async function expectContained(page) {
     .filter(el => el.scrollWidth > el.clientWidth + 1)
     .map(el => el.className));
   expect(overflow).toEqual([]);
-  const nav = await page.getByRole('navigation', { name: 'Mobile navigation' }).boundingBox();
-  expect(nav.y + nav.height).toBeLessThanOrEqual(page.viewportSize().height + 1);
+  await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toHaveCount(0);
 }
 
 for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 844, height: 390 }]) {
@@ -57,19 +62,22 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }
     await expectContained(page);
     const feed = await page.locator('.mob-chat-feed').boundingBox();
     expect(feed.height).toBeGreaterThan(70);
-    const nav = page.getByRole('navigation', { name: 'Mobile navigation' });
-    await nav.getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to activity', exact: true }).click();
+    await page.getByRole('button', { name: 'New', exact: true }).click();
     await page.getByRole('textbox', { name: 'Prompt' }).fill('Review the mobile navigation.');
     await expectContained(page);
     await page.locator('.mob-launch-options > summary').click();
     await expectContained(page);
-    await nav.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to activity', exact: true }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.getByText('Loading settings...')).toBeHidden();
     await expectContained(page);
     const fonts = await page.locator('.mob-settings select').evaluateAll(els => els.map(el => parseFloat(getComputedStyle(el).fontSize)));
     expect(fonts.length).toBeGreaterThan(0);
     expect(fonts.every(size => size >= 16)).toBe(true);
-    await nav.getByRole('button', { name: 'Approvals', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to activity', exact: true }).click();
+    await page.getByRole('button', { name: /Improve mobile layouts and usability/ }).first().click();
+    await page.getByRole('button', { name: 'Changes', exact: true }).click();
     await expectContained(page);
     expect(errors).toEqual([]);
   });
@@ -88,7 +96,7 @@ test('chat composer and transcript fit above an on-screen keyboard', async ({ pa
     window.visualViewport.dispatchEvent(new Event('resize'));
   });
   await expect(page.locator('.mob-app')).toHaveAttribute('data-keyboard', 'open');
-  await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'Session views' })).toBeHidden();
   const composer = await page.locator('.mob-composer').boundingBox();
   const feed = await page.locator('.mob-chat-feed').boundingBox();
   expect(composer.y + composer.height).toBeLessThanOrEqual(370);
@@ -102,5 +110,35 @@ test('chat composer and transcript fit above an on-screen keyboard', async ({ pa
     window.visualViewport.dispatchEvent(new Event('resize'));
   });
   await expect(page.locator('.mob-app')).toHaveAttribute('data-keyboard', 'closed');
-  await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Session views' })).toBeVisible();
 });
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }]) {
+  test(`graph returns to Work without trapping navigation at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await openWorkspace(page);
+    await page.getByRole('button', { name: /Improve mobile layouts and usability/ }).click();
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Keep my draft');
+    await page.getByRole('button', { name: 'Work', exact: true }).click();
+    await page.getByRole('button', { name: /^Dashboard/ }).click();
+    await page.getByRole('button', { name: /Graph/ }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close graph inspector' })).toBeInViewport();
+    await page.goBack();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Work', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('button', { name: /^Dashboard/ })).toHaveAttribute('aria-pressed', 'true');
+    await page.goForward();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('button', { name: 'Close graph inspector' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Changes', exact: true }).click();
+    await page.getByRole('button', { name: 'Work', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Chat', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue('Keep my draft');
+    await page.getByRole('button', { name: 'Back to activity', exact: true }).click();
+    await expect(page.getByRole('main', { name: 'Activity', exact: true })).toBeVisible();
+    await expectContained(page);
+  });
+}

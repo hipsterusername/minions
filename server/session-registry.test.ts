@@ -1,3 +1,4 @@
+import { loadRecentEvents } from "./session-persist.ts";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
@@ -173,7 +174,7 @@ describe("SessionRegistry armed minion prompt resumes", () => {
     const registry = new SessionRegistry();
     registry.setDeps({
       bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
-      startChildSession: (opts) => registry.start(opts),
+      startChildSession: (opts) => { void registry.start(opts); },
       forEachLeaderTaskState: registry.forEachLeaderTaskState,
     });
     const armedPrompt =
@@ -736,12 +737,16 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     expect(host?.taskState?.approval?.summary).toBe("ready");
   });
 
-  it("hydrates the requested and effective sandbox posture", () => {
+  it.each([
+    { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
+    { filesystemScope: "unrestricted", approvalPolicy: "never", fullHostScope: "leader-and-minions" },
+  ] as const)("hydrates the requested and effective sandbox posture: %j", (requested) => {
+    const effective = { filesystemScope: requested.filesystemScope, approvalPolicy: requested.approvalPolicy };
     persistSession(makePersisted({
       id: "sandboxed-leader",
       sandboxPolicy: {
-        requested: { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
-        effective: { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
+        requested,
+        effective,
         unsupported: [],
       },
     }));
@@ -749,8 +754,8 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
     const r = new SessionRegistry();
     r.hydrateFromDb();
     expect(r.get("sandboxed-leader")?.sandboxPolicy).toEqual({
-      requested: { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
-      effective: { filesystemScope: "workspace-write", approvalPolicy: "on-request" },
+      requested,
+      effective,
       unsupported: [],
     });
   });
@@ -859,11 +864,11 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
       approval: null,
     });
 
-    const startChildSession = vi.fn();
+    const resumeWorkItemRun = vi.fn();
     const r = new SessionRegistry();
     r.setDeps({
       bus: createBus({ clients: new Set() } as unknown as WebSocketServer),
-      startChildSession,
+      startChildSession: vi.fn(), resumeWorkItemRun,
       forEachLeaderTaskState: r.forEachLeaderTaskState,
     });
     r.hydrateFromDb();
@@ -874,8 +879,9 @@ describe("SessionRegistry.hydrateFromDb — sessionId round-trip", () => {
       result: "child finished",
     });
     expect(r.get("leader-recover")?.taskState?.pendingWait).toBeNull();
-    expect(startChildSession).toHaveBeenCalledOnce();
-    expect(r.get("minion-recover")?.eventBuffer).toContainEqual(
+    expect(resumeWorkItemRun).toHaveBeenCalledOnce();
+    expect(r.get("minion-recover")?.eventBuffer).toEqual([]);
+    expect(loadRecentEvents("minion-recover")).toContainEqual(
       expect.objectContaining({
         sessionKey: "minion-recover",
         message: { role: "assistant", content: "durable child history" },

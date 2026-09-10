@@ -227,6 +227,20 @@ describe("GraphInspector", () => {
     }
   });
 
+  it("reveals the requested node details when opened on a narrow screen", () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 720 });
+    try {
+      render(<GraphInspector snapshot={createGraphFixture(10)} initialSelectedNodeId="node-7"
+        onClose={vi.fn()} onAction={vi.fn()} />);
+      expect(screen.getByRole("heading", { name: "Task 7" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Toggle details rail" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Toggle plan rail" })).toHaveAttribute("aria-pressed", "false");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  });
+
   it("keeps logical, attempt, verification, and blocker encodings distinct", () => {
     const snapshot = createGraphFixture(10);
     render(<GraphInspector snapshot={snapshot} initialTab="topology" onClose={vi.fn()} onAction={vi.fn()} />);

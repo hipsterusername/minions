@@ -1,3 +1,4 @@
+import { resumePrimaryWake } from "./wake-primary-resume.ts";
 import type { WorkItemInvocation } from "./work-item-invocation.ts";
 export type { WorkItemInvocation } from "./work-item-invocation.ts";
 import type Database from "better-sqlite3";
@@ -31,7 +32,7 @@ import { executeWorkItemCommand, findCommandResult } from "./work-item-command-l
 import { getWorkItemReceipt, saveWorkItemReceipt } from "./work-item-receipts.ts";
 import { emitBindingChanged, emitItemChanged, emitRunChanged } from "./work-item-service-events.ts";
 import { buildRunHandoff, inheritRunContinuity } from "./work-item-handoff.ts";
-import { compatibleResumeId, resolvePrimaryRunConfig } from "./work-item-run-config.ts";
+import { compatibleResumeId, inheritedPrimaryRunConfig, resolvePrimaryRunConfig } from "./work-item-run-config.ts";
 import { resolveWorkItemMutation } from "./work-item-archive.ts";
 import { continueChildWorkItemRun, continueWorkItemIntent, type RunContinuationInput } from "./work-item-continuation.ts";
 import { bindingSnapshot, itemSnapshot, runSnapshot } from "./work-item-snapshots.ts";
@@ -124,9 +125,7 @@ export class SqliteWorkItemService implements WorkItemService {
     const previous = input.expectedCurrentRunKey
       ? getWorkItemRun(this.options.db, input.expectedCurrentRunKey)
       : null;
-    const inherited = previous?.run_config_json ?? (previous
-      ? JSON.stringify({ harness: previous.harness_name, ...(previous.model ? { model: previous.model } : {}) })
-      : null);
+    const inherited = previous ? JSON.stringify(inheritedPrimaryRunConfig(previous)) : null;
     try {
       const resolved = resolvePrimaryRunConfig(inheritRunContinuity(this.options.db, previous, inherited), input);
       const ledger = executeWorkItemCommand(this.options.db, { requestId: input.requestId,
@@ -236,6 +235,7 @@ export class SqliteWorkItemService implements WorkItemService {
     } catch (error) { return this.translate(error, input.workItemId); }
   }
   async resumePrimaryRun(input: RunContinuationInput): Promise<WorkItemDetailSnapshot> {
+    if (input.continuitySource === "system") return resumePrimaryWake(this, input);
     const detail = this.latestOrThrow(input.workItemId);
     return this.replyToWaitingRun({ ...input,
       expectedLifecycleRevision: detail.workItem.lifecycle.lifecycleRevision,

@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { beforeEach, describe, expect, it } from "vitest";
 import { compileWorkPacket } from "./compile.ts";
 import { clearFreshnessCache } from "./freshness.ts";
@@ -87,11 +87,10 @@ describe("repository model context quality", () => {
   });
 });
 
-function repositoryFiles(dir = "."): string[] {
-  const ignored = new Set(["node_modules", ".git", ".minions", ".canvas-worktrees", "dist", "coverage"]);
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry): string[] => {
-    if (ignored.has(entry.name) || entry.isSymbolicLink()) return [];
-    const file = dir === "." ? entry.name : `${dir}/${entry.name}`;
-    return entry.isDirectory() ? repositoryFiles(file) : [file];
-  });
+function repositoryFiles(): string[] {
+  // Include new source files, but exclude ignored runtime/worktree fixtures.
+  // Git enumeration also avoids racing temporary directory removal by workers.
+  return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }).split("\0").filter(Boolean);
 }

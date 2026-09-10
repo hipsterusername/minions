@@ -1,3 +1,5 @@
+import { readHistoricalDirectives } from "./session-history.ts";
+import { semanticHistory } from "./session-history-host.ts";
 import { persistContextSource } from "./context-source.ts";
 import { recoveryTag, renderRecoveryFacts, type RecoveryFacts } from "../shared/recovery-context.ts";
 import { boundHandoffText, renderConnectedHandoff, retainUserDirectives, userTextFromPrompt } from "../shared/handoff-text.ts";
@@ -97,9 +99,11 @@ export function compileContextCheckpoint(
   const prompt = typeof input.originalPrompt === "string" ? input.originalPrompt.trim() : "";
   const prior = host.contextCheckpoint;
   const semantic = parseHandoff(input.modelHandoff ?? "");
+  const historyDb = persistenceDb();
+  const historicalDirectives = historyDb ? readHistoricalDirectives(historyDb, host.id) : [];
   const previousDirectives = host.continuity?.directives.length ? host.continuity.directives
     : prior?.userDirectives.length ? prior.userDirectives
-      : (host.eventBuffer ?? []).flatMap(row => row.type === "sdk_event" && row.event?.kind === "text"
+      : historicalDirectives.length ? historicalDirectives : semanticHistory(host).flatMap(row => row.type === "sdk_event" && row.event?.kind === "text"
         && row.event.role === "user" ? [userTextFromPrompt(row.event.text)] : []);
   const directives = retainUserDirectives([...previousDirectives, userTextFromPrompt(prompt)]);
   const objective = directives[0] || prior?.objective.statement
@@ -108,7 +112,7 @@ export function compileContextCheckpoint(
   const components = host.renderState?.components ?? [];
   const artifacts = collectArtifacts(tasks, components, host);
   const db = persistenceDb();
-  if (db && db.name !== ":memory:") artifacts.unshift({ kind: "file", ref: `${db.name}: session_user_directives (full instructions, ordered by id) and session_continuity (full source snapshot); session_key=${host.id}` });
+  if (db && db.name !== ":memory:") artifacts.unshift({ kind: "file", ref: `${db.name}: event_log (exact events, ordered by id), session_user_directives (full instructions, ordered by id) and session_continuity (full source snapshot); session_key=${host.id}` });
   const now = Date.now();
   const checkpoint: ContextCheckpoint = {
     version: 1,
@@ -158,7 +162,7 @@ export function compileContextCheckpoint(
     },
     modelHandoff: truncateMiddle((/^Automatic checkpoint/.test(input.modelHandoff ?? "")
       ? prior?.modelHandoff : input.modelHandoff) || prior?.modelHandoff || "", MAX_HANDOFF_CHARS),
-    recentEvents: collectRecentEvents(host.eventBuffer ?? []),
+    recentEvents: collectRecentEvents(semanticHistory(host)),
     connectedContext: host.continuity?.canvasContext !== undefined ? host.continuity.canvasContext
       : host.canvasContext ?? getSessionCanvasContext(host.id),
     recoveryCause: input.recoveryCause ? truncateMiddle(input.recoveryCause, 1_200) : null,

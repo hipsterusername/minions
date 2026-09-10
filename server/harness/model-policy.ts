@@ -13,6 +13,14 @@ const POLICIES: Record<string, HarnessModelPolicy> = {
   codex: CODEX_MODEL_POLICY,
 };
 
+/** Infer only unambiguous advertised models/aliases; custom IDs need a harness. */
+export function harnessForModel(model: string | null | undefined): string | undefined {
+  if (!model) return undefined;
+  const matches = productionHarnesses().filter((harness) =>
+    harness.staticInfo().models.some((item) => item.id === harness.resolveModel(model)));
+  return matches.length === 1 ? matches[0]!.name : undefined;
+}
+
 export function modelPolicy(name: string): HarnessModelPolicy | undefined {
   const configured = POLICIES[name];
   if (configured) return configured;

@@ -510,6 +510,23 @@ describe("turn.failed", () => {
 });
 
 describe("error (top-level ThreadErrorEvent)", () => {
+  it.each([
+    "Reconnecting... 1/5",
+    "Reconnecting... 2/5 (stream disconnected before completion: websocket closed by server before response.completed)",
+  ])("keeps a reconnect notice nonterminal: %s", (message) => {
+    const events = makeTranslator().translate({ type: "error", message });
+    expect(events).toEqual([{
+      kind: "api_retry", attempt: Number(message.match(/(\d+)\//)?.[1]), reason: message,
+    }]);
+  });
+
+  it("does not mistake a fatal error mentioning reconnects for a retry", () => {
+    const message = "Connection failed after Reconnecting... 5/5";
+    expect(makeTranslator().translate({ type: "error", message })).toEqual([
+      { kind: "done", reason: "error", error: message },
+    ]);
+  });
+
   it("emits done with reason=error and the message", () => {
     const tr = makeTranslator();
     const events = tr.translate({ type: "error", message: "Stream terminated unexpectedly" });

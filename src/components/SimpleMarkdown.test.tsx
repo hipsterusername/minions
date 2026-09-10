@@ -10,6 +10,11 @@ function renderMessage(text: string, onClick = vi.fn()) {
 }
 
 describe("chat hyperlinks", () => {
+  it("opens authenticated archive links directly instead of treating them as local files", () => {
+    renderMessage("[History](/api/history/session-1?before=10) [Exact](/api/history/session-1/events/11)");
+    expect(screen.getByRole("link", { name: "History" })).toHaveAttribute("href", "/api/history/session-1?before=10");
+    expect(screen.getByRole("link", { name: "Exact" })).toHaveAttribute("href", "/api/history/session-1/events/11");
+  });
   it("opens web links in a separate tab without selecting the message", () => {
     const select = vi.fn();
     renderMessage("Read [**the docs**](https://example.com/docs_(new)) now.", select);

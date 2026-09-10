@@ -13,8 +13,7 @@ export function buildFreshThreadPrompt(host: SessionHost, opts: StartSessionOpti
   const prefix = (text: string): string => {
     const history = !text.includes("<context-checkpoint") && !text.includes("<previous-run-context>")
       && (host.contextCheckpoint || host.continuity?.directives.some(d => d !== userTextFromPrompt(text))
-        || host.eventBuffer.some(row => row.type === "sdk_event"
-        && row.event?.kind === "text" && row.event.role === "assistant"))
+        || host.historyFacts.hasAssistant)
       ? renderCheckpointPrompt(compileContextCheckpoint(host, {
         trigger: "context_recovery", originalPrompt: opts.continuitySource === "system" ? "" : text, persist: false,
       })) : "";

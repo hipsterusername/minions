@@ -57,14 +57,28 @@ export function resolvePrimaryRunConfig(previousJson: string | null, input: Conf
   return { config, json: JSON.stringify(config) };
 }
 
+interface PreviousRunConfig {
+  run_config_json: string | null;
+  harness_name: string;
+  model?: string | null;
+}
+
+export function inheritedPrimaryRunConfig(previous: PreviousRunConfig): PrimaryRunConfig {
+  const stored = previous.run_config_json ? JSON.parse(previous.run_config_json) as PrimaryRunConfig : {};
+  // Before a host initializes, the row has a placeholder harness and no model.
+  // Once it resolves a model, the actual selection supersedes requested settings
+  // (which may have fallen back or been changed during the run).
+  return { ...stored,
+    harness: previous.model ? previous.harness_name : stored.harness ?? previous.harness_name,
+    ...(previous.model ? { model: previous.model } : {}),
+  };
+}
+
 export function compatibleResumeId(
-  previous: { session_id: string | null; run_config_json: string | null; harness_name: string } | null,
+  previous: (PreviousRunConfig & { session_id: string | null }) | null,
   next: PrimaryRunConfig,
 ): string | undefined {
   if (!previous?.session_id) return undefined;
-  const prior = previous.run_config_json
-    ? JSON.parse(previous.run_config_json) as PrimaryRunConfig
-    : { harness: previous.harness_name };
-  return prior.harness === undefined || prior.harness === next.harness
+  return inheritedPrimaryRunConfig(previous).harness === next.harness
     ? previous.session_id : undefined;
 }

@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { minionContextSchema } from "./minion-context.ts";
 
 export const hashSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 export const jsonRecordSchema = z.record(z.string(), z.unknown());
@@ -40,6 +41,7 @@ export const verificationTaskVerdictSchema = z.object({
 }).strict();
 export const taskNodeSchema = z.object({
   id: z.string().min(1), title: z.string().min(1), objective: z.string().min(1),
+  context: minionContextSchema.optional(),
   inputBindings: jsonRecordSchema.default({}), outputSchemas: jsonRecordSchema.default({}),
   constraints: z.array(z.string()).default([]), acceptanceCriteria: z.array(z.string()).default([]),
   executorClass: z.enum(["mechanical","standard","reasoning"]), allowedHarnesses: z.array(z.string().min(1)).min(1),

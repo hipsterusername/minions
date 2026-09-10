@@ -1,10 +1,10 @@
 /** Server-side write-through persistence and boot hydration glue. */
-
 import fs from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { initDb } from "./db.ts";
 import * as repo from "./session-repo.ts";
+import { readHistoryPage } from "./session-history.ts";
 import type { ApprovalState, TaskManagerState } from "./task-tools.ts";
 import type { RenderState } from "../shared/render-dsl.ts";
 import type { WorktreeInfo } from "./worktree-types.ts";
@@ -269,13 +269,14 @@ export function removePersistedSession(sessionKey: string): boolean {
 export function persistEvent(
   sessionKey: string,
   event: BufferedEvent,
-): void {
+): number | null {
   const db = ensureDb();
-  if (!db) return;
+  if (!db) { if (disabled) return null; throw new Error("Event persistence unavailable"); }
   try {
-    repo.appendEvent(db, sessionKey, event.type, event);
+    return repo.appendEvent(db, sessionKey, event.type, event);
   } catch (err) {
     log.warn("event_persist_failed", { error: err });
+    throw err;
   }
 }
 
@@ -308,8 +309,7 @@ export function loadRecentEvents(
   const db = ensureDb();
   if (!db) return [];
   try {
-    const rows = repo.getRecentEvents(db, sessionKey, limit);
-    return rows.map((r) => JSON.parse(r.payload) as BufferedEvent);
+    return readHistoryPage(db, sessionKey, undefined, limit).events;
   } catch (err) {
     log.warn("recent_events_load_failed", { error: err });
     return [];
@@ -385,7 +385,7 @@ export function hydrateSessionsFromDb(): HydratedSession[] {
       tasks = hydrateLeaderTaskState(db, row);
     }
     const render = repo.getRenderState(db, row.session_key);
-    const events = loadRecentEvents(row.session_key);
+    const events: BufferedEvent[] = [];
     const usageTotals = loadSessionUsageTotals(row.session_key);
     out.push({
       row,

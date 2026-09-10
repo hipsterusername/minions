@@ -8,6 +8,7 @@ import {
   buildWakeTaskDigest,
   isWakeWorthyStatus,
   requestCoalescedWake,
+  isHostWakeEligible,
 } from "./wake-coalescer.ts";
 import { isTerminalTaskStatus } from "./task-lifecycle.ts";
 import type { PendingWait, TaskManagerState, TaskRecord } from "./task-tools/types.ts";
@@ -44,6 +45,7 @@ export function wakeLeaderFromDurableTaskState(
   host: SessionHost,
   deps: SessionHostDeps,
 ): void {
+  if (!isHostWakeEligible(host, deps)) return;
   const minionTasks = host.taskState
     ? Array.from(host.taskState.tasks.values()).filter((task) => task.executor === "minion")
     : [];
@@ -58,6 +60,7 @@ export function wakeLeaderFromDurableTaskState(
     const conditionMet = isWaitCohortSatisfied(waitTasks, wakeOn);
     if (!conditionMet) return;
     const digest = buildWakeTaskDigest(waitTasks, pendingWait.scheduledAt);
+    const acknowledge = attentionAcknowledgement(host, waitTasks);
     requestWaitResume(host, deps, {
       completedReason: "The delegated wait cohort reached its terminal policy.",
       immediate: wakeOn === "all_terminal",
@@ -73,7 +76,7 @@ export function wakeLeaderFromDurableTaskState(
         role: host.role,
         harness: host.harnessName,
       },
-      onDelivered: () => markAttentionDelivered(host, waitTasks),
+      onDelivered: acknowledge,
     });
     return;
   }
@@ -88,24 +91,29 @@ export function wakeLeaderFromDurableTaskState(
   );
   if (meaningfulTasks.length === 0) return;
 
-  const digest = buildWakeTaskDigest(meaningfulTasks);
-  requestCoalescedWake(host, deps, {
-    opts: {
-      sessionKey: host.id,
-      invocationKind: "resume_open_run",
-      prompt: `A delegated task reached a state needing your attention while you were idle:\n${digest}\nReview it (answer a blocked task with message_task) and continue orchestrating.`,
-      cwd: host.cwd,
-      resumeId: host.sessionId ?? undefined,
-      role: host.role,
-      harness: host.harnessName,
-    },
-    allowStopped: true,
-    idempotencyKey: `tasks:${host.id}:${meaningfulTasks
-      .map((task) => `${task.taskId}:${task.attentionRequestedAt ?? task.completedAt ?? task.createdAt}`)
-      .sort()
-      .join(",")}`,
-    onDelivered: () => markAttentionDelivered(host, meaningfulTasks),
-  });
+  for (const task of meaningfulTasks) {
+    const digest = buildWakeTaskDigest([task]);
+    const acknowledge = attentionAcknowledgement(host, [task]);
+    requestCoalescedWake(host, deps, {
+      opts: {
+        sessionKey: host.id,
+        invocationKind: "resume_open_run",
+        prompt: `A delegated task reached a state needing your attention while you were idle:\n${digest}\nReview it (answer a blocked task with message_task) and continue orchestrating.`,
+        cwd: host.cwd,
+        resumeId: host.sessionId ?? undefined,
+        role: host.role,
+        harness: host.harnessName,
+      },
+      allowStopped: true,
+      idempotencyKey: `task:${host.id}:${task.taskId}:${task.attentionRequestedAt ?? task.completedAt ?? task.createdAt}`,
+      onDelivered: () => {
+        acknowledge();
+        // Refill from durable attention as capacity becomes available. A burst
+        // larger than the queue must not require an unrelated event to drain.
+        wakeLeaderFromDurableTaskState(host, deps);
+      },
+    });
+  }
 }
 
 function markAttentionDelivered(
@@ -117,4 +125,12 @@ function markAttentionDelivered(
     if (task.attentionDeliveredAt == null) task.attentionDeliveredAt = deliveredAt;
   }
   if (host.taskState) persistTaskState(host.id, host.taskState);
+}
+
+function attentionAcknowledgement(host: SessionHost, tasks: TaskRecord[]): () => void {
+  const identities = tasks.map(task => ({ task, requestedAt: task.attentionRequestedAt,
+    status: task.status, attemptId: task.attemptId }));
+  return () => markAttentionDelivered(host, identities.filter(({ task, requestedAt, status, attemptId }) =>
+    host.taskState?.tasks.get(task.taskId) === task && task.attentionRequestedAt === requestedAt
+    && task.status === status && task.attemptId === attemptId).map(({ task }) => task));
 }

@@ -16,6 +16,58 @@
   padding: 12px 4px;
 }
 
+.act-tx-run-boundary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 4px;
+  scroll-margin-block: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-size-caption);
+}
+
+.act-tx-run-boundary-line {
+  flex: 1;
+  min-width: 12px;
+  height: 1px;
+  background: var(--border-default);
+}
+
+.act-tx-run-boundary a,
+.act-tx-run-boundary button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.act-tx-run-boundary a:hover,
+.act-tx-run-boundary button:hover,
+.act-tx-run-boundary:target > a:first-child {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+}
+
+.act-tx-run-boundary:focus-visible,
+.act-tx-run-boundary a:focus-visible,
+.act-tx-run-boundary button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 999px;
+}
+
 .act-tx-msg {
   display: flex;
   flex-direction: column;

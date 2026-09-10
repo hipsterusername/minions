@@ -1,9 +1,12 @@
 import { renderSourceExcerpt } from "../../shared/handoff-text.ts";
+import type { MinionContext } from "../../shared/minion-context.ts";
+import { renderMinionReferences } from "../../shared/prompts/minion-context.ts";
 import { PROJECT_CONTEXT_CHAR_LIMIT } from "../../shared/project-context.ts";
 export { PROJECT_CONTEXT_CHAR_LIMIT } from "../../shared/project-context.ts";
 import { compileWorktreeCompletionPolicy } from "../session-host-config.ts";
 
 interface TaskSpawnPromptArgs {
+  context?: MinionContext | undefined;
   taskId: string;
   title: string;
   priority: string;
@@ -97,6 +100,8 @@ export function buildTaskSpawnPrompt(args: TaskSpawnPromptArgs): string {
     lines.push("", "## System Model Context", "", args.contextPack);
   }
   lines.push("", "## Description", "", args.description);
+  const references = renderMinionReferences(args.context);
+  if (references) lines.push("", references);
   appendListSection(lines, "## Files / surface area", args.files);
   appendListSection(lines, "## Constraints", args.constraints);
   appendListSection(lines, "## Acceptance criteria", args.acceptanceCriteria);

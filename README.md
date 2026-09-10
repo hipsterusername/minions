@@ -183,12 +183,19 @@ Leader configuration exposes two independent boundaries:
   isolated worktree. It is a coordination and review boundary, not an
   operating-system sandbox.
 - **Execution sandbox** requests filesystem access (`read-only`,
-  `workspace-write`, or explicit `unrestricted`), approval behavior, and
-  network access independently. An explicit sandbox policy takes precedence over legacy plan mode; without
+  `workspace-write`, or explicit `unrestricted`) and approval behavior
+  independently. An explicit sandbox policy takes precedence over legacy plan mode; without
   an explicit policy, legacy plan mode defaults to read-only. Normal execution
-  defaults to workspace-write with network disabled.
+  defaults to workspace-write.
 
-Codex enforces all three sandbox axes. Harnesses that cannot enforce an axis
+Full Host has two choices: **Full Host - Leader Only** keeps Minions in their
+task sandbox, while **Full Host - Leader + Minions** also grants full host access
+to newly launched Minions, including graph tasks. Task-specific approval policies
+still apply. Existing saved Full Host settings remain Leader-only. Choose the
+scope in project defaults or before launching a new Leader; it persists across
+resumes and restarts. Running processes retain their launch policy.
+
+Codex enforces both sandbox axes. Harnesses that cannot enforce an axis
 report it as `unmanaged`; Minions does not claim that Claude, OpenCode, or Pi
 enforce these provider-neutral sandbox guarantees. Treat requested policy and
 effective policy as different values, and use OS-level isolation when an

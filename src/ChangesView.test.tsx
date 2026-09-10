@@ -125,11 +125,13 @@ describe("<SessionChangesPanel />", () => {
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "get_worktree_diff", sessionKey: "s1", requestId: expect.any(String) }));
   });
 
-  it("does not mount a review surface or request a diff in live mode", () => {
+  it("loads live changes without exposing stale approval controls", () => {
     const send = vi.fn();
-    const view = renderPanel({ worktreeIsolation: false, approvalPending: true }, { send });
-    expect(view.container).toBeEmptyDOMElement();
-    expect(send).not.toHaveBeenCalled();
+    renderPanel({ worktreeIsolation: false, approvalPending: true }, { send });
+    expect(screen.getByRole("region", { name: "Workspace changes" })).toBeVisible();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "get_worktree_diff", sessionKey: "s1" }));
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
   });
 
   it("merges via approve_changes after confirming", () => {

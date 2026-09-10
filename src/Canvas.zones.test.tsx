@@ -64,11 +64,13 @@ it("excludes parked nodes and zone metadata from fit and marquee/delete while le
 
 it("switches to a distant workspace and fits its retained layout without revealing Global content", () => {
   const { container } = render(<Harness />);
+  const leaderElement = screen.getByText("Live leader");
   const root = container.querySelector<HTMLElement>(".canvas-root")!;
   vi.spyOn(root, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} });
   fireEvent.click(screen.getByRole("button", { name: /^Workspaces ·/ }));
   fireEvent.click(screen.getByRole("button", { name: "Switch to Release" }));
   expect(screen.getByText("Live leader")).toBeVisible();
+  expect(screen.getByText("Live leader")).toBe(leaderElement);
   expect(screen.getByText("Visible note")).not.toBeVisible();
   const camera = JSON.parse(screen.getByTestId("transform").textContent!);
   const node = current.find(n => n.id === "leader")!;
@@ -80,6 +82,7 @@ it("switches to a distant workspace and fits its retained layout without reveali
   fireEvent.click(screen.getByRole("button", { name: /^Workspaces ·/ }));
   fireEvent.click(screen.getByRole("button", { name: "Switch to Global" }));
   expect(screen.getByText("Live leader")).not.toBeVisible();
+  expect(screen.getByText("Live leader")).toBe(leaderElement);
   expect(screen.getByText("Visible note")).toBeVisible();
 });
 

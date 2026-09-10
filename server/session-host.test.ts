@@ -154,6 +154,24 @@ afterEach(() => {
 });
 
 describe("SessionHost.start — happy-path lifecycle", () => {
+  it.each(["throw", "done-error", "text", "done-success"])("requires provider response evidence after init: %s", async mode => {
+    const { host, deps } = makeHarness("acceptance");
+    const opened = vi.fn(), accepted = vi.fn();
+    harnessRef.startFnOverride = () => ({ control: { abort: () => {} }, events: (async function* () {
+      yield { kind: "init", sessionId: "thread", model: "test" } as NormalizedEvent;
+      yield { kind: "text", role: "user", text: "instruction echo" } as NormalizedEvent;
+      expect(opened).toHaveBeenCalledOnce(); expect(accepted).not.toHaveBeenCalled();
+      if (mode === "throw") throw new Error("lazy setup failed");
+      if (mode === "text") {
+        yield { kind: "text", role: "assistant", text: "accepted" } as NormalizedEvent;
+        expect(accepted).toHaveBeenCalledOnce();
+      }
+      yield { kind: "done", reason: mode === "done-error" ? "error" : "completed" } as NormalizedEvent;
+    })() });
+    await host.start({ sessionKey: host.id, prompt: "instruction", cwd: host.cwd, role: "default" }, deps, opened, accepted);
+    expect(accepted).toHaveBeenCalledTimes(mode === "text" || mode === "done-success" ? 1 : 0);
+  });
+
   it("labels uncoordinated legacy Claude live mode as compatibility observe-only", async () => {
     const { host, deps, envelopes } = makeHarness("legacy-claude");
     await host.start({ sessionKey: host.id, prompt: "read", cwd: host.cwd,
@@ -297,7 +315,8 @@ describe("SessionHost.start — happy-path lifecycle", () => {
   it("drains a queued wait resume after the current run becomes idle", async () => {
     const { host, deps, envelopes } = makeHarness("leader-1");
     host.role = "leader";
-    const startChildSession = deps.startChildSession as ReturnType<typeof vi.fn>;
+    const resumeWorkItemRun = vi.fn();
+    deps.resumeWorkItemRun = resumeWorkItemRun;
 
     harnessRef.startFnOverride = () => ({
       events: (async function* () {
@@ -325,7 +344,7 @@ describe("SessionHost.start — happy-path lifecycle", () => {
             harness: "claude",
           },
         });
-        expect(startChildSession).not.toHaveBeenCalled();
+        expect(resumeWorkItemRun).not.toHaveBeenCalled();
         yield { kind: "done", reason: "stop" };
       })(),
       control: { abort: () => {} },
@@ -334,9 +353,9 @@ describe("SessionHost.start — happy-path lifecycle", () => {
     await host.start({ sessionKey: host.id, prompt: "p", cwd: host.cwd, role: "leader", workItemId: "work-1" }, deps);
 
     expect(host.taskState?.pendingWait).toBeNull();
-    expect(startChildSession).toHaveBeenCalledWith(expect.objectContaining({
-      sessionKey: "leader-1",
-      resumeId: "sdk-queued",
+    expect(resumeWorkItemRun).toHaveBeenCalledWith(expect.objectContaining({
+      runKey: "leader-1",
+      workItemId: "work-1",
       prompt: "Continue.",
     }));
     expect(envelopes.some((e) =>

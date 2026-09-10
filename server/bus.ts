@@ -1,3 +1,4 @@
+import { reserveOutbound } from "./transport-budget.ts";
 /**
  * Typed WebSocket bus for all outbound server traffic.
  *
@@ -18,6 +19,7 @@
  * `broadcast(` call sites are zero outside this file.
  */
 
+import { historyProjection } from "./session-history-host.ts";
 import type { WebSocketServer, WebSocket } from "ws";
 import {
   sessionTopic,
@@ -35,6 +37,7 @@ export const MAX_CLIENT_BUFFERED_BYTES = 4 * 1024 * 1024;
 export const MAX_CLIENT_BURST_BYTES = 32 * 1024 * 1024;
 export const CLIENT_DRAIN_TIMEOUT_MS = 5_000;
 
+const wireProjections = new WeakMap<WsEnvelope, WsEnvelope>();
 const pendingDrainChecks = new WeakMap<WebSocket, () => void>();
 
 function checkClientPressure(client: WebSocket): void {
@@ -83,10 +86,13 @@ function sendBounded(client: WebSocket, message: string): void {
       client.terminate();
       return;
     }
-    client.send(message, error => {
+    const release = reserveOutbound(client, messageBytes);
+    if (!release) { client.terminate(); return; }
+    try { client.send(message, error => {
+      release();
       if (error) log.warn("client_send_failed", { error });
       checkClientPressure(client);
-    });
+    }); } catch (error) { release(); throw error; }
     checkClientPressure(client);
   } catch (error) {
     log.warn("client_send_failed", { error });
@@ -106,7 +112,7 @@ export type BusPayload = { type: string } & Record<string, unknown>;
  * helpers below so the call site documents who the message is for.
  */
 export function broadcast(wss: WebSocketServer, envelope: WsEnvelope): void {
-  const msg = JSON.stringify(envelope);
+  const msg = JSON.stringify(wireProjections.get(envelope) ?? envelope);
   for (const client of wss.clients) {
     // `ws` exposes a numeric readyState; 1 === OPEN without importing the
     // constant (server-side it's `WebSocket.OPEN` from the `ws` lib).
@@ -115,7 +121,10 @@ export function broadcast(wss: WebSocketServer, envelope: WsEnvelope): void {
 }
 
 function wrap(topic: Topic, payload: BusPayload): WsEnvelope {
-  return { ...payload, topic };
+  const envelope = { ...payload, topic } as WsEnvelope;
+  const projection = historyProjection(payload);
+  if (projection !== payload) wireProjections.set(envelope, { ...projection, topic } as WsEnvelope);
+  return envelope;
 }
 
 export interface Bus {
@@ -160,7 +169,8 @@ export function unicast(
   topic: Topic,
   payload: BusPayload,
 ): void {
-  sendBounded(ws, JSON.stringify(wrap(topic, payload)));
+  const envelope = wrap(topic, payload);
+  sendBounded(ws, JSON.stringify(wireProjections.get(envelope) ?? envelope));
 }
 
 /**

@@ -237,7 +237,7 @@ describe("LaunchScreen", () => {
     });
 
     await waitFor(() => expect(screen.getByLabelText("Workspace write")).toBeChecked());
-    fireEvent.click(screen.getByLabelText("Full host access"));
+    fireEvent.click(screen.getByLabelText("Full Host - Leader + Minions"));
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Use host tools" } });
     fireEvent.click(screen.getByRole("button", { name: "Launch leader" }));
 
@@ -248,6 +248,7 @@ describe("LaunchScreen", () => {
       sandboxPolicy: {
         filesystemScope: "unrestricted",
         approvalPolicy: "on-request",
+        fullHostScope: "leader-and-minions",
       },
 
       }),

@@ -1,4 +1,5 @@
 import type { DisplayMessage } from "../../sdk-messages.ts";
+import { isArchiveDisplayMessage } from "../../archive-display.ts";
 
 export type LeaderTranscriptMode = "lean" | "full";
 
@@ -18,6 +19,7 @@ export function buildLeaderTranscriptBlocks(
   mode: LeaderTranscriptMode,
 ): string[] {
   return messages.flatMap((message) => {
+    if (isArchiveDisplayMessage(message)) return [];
     const content = message.content.trim();
     if (!content) return [];
 

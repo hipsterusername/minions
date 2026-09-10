@@ -1,19 +1,6 @@
-/**
- * CodexHarness — AgentHarness implementation for OpenAI's Codex SDK.
- *
- * Wraps the `Codex` / `Thread.runStreamed` loop from `@openai/codex-sdk` and
- * translates its event stream to the normalized event format defined in
- * `shared/normalized-event.ts`.
- *
- * Tools reach Codex through the streamable-HTTP MCP bridge (see
- * `server/mcp-bridge/`) — not in-process, the way Claude consumes them.
- * The bridge URL + bearer token are passed to the Codex CLI through
- * `--config` overrides rendered by `./mcp-config.ts`; tokens never appear
- * in the argv (they're injected via env-vars Codex reads at startup).
- *
- * Image attachments are written to a per-session scratch directory under
- * `os.tmpdir()/minions-codex-attachments/<sessionKey>/` and passed as
- * `local_image` UserInput entries.
+/** Codex SDK adapter: normalizes Thread.runStreamed events via ./translate.ts.
+ * Tools use the HTTP MCP bridge; ./mcp-config.ts supplies config and env-only tokens.
+ * Images become local_image inputs under os.tmpdir()/minions-codex-attachments/<sessionKey>/.
  */
 
 import { Codex } from "@openai/codex-sdk";
@@ -249,25 +236,28 @@ class CodexHarness implements AgentHarness {
           return;
         }
 
-        // Track explicit and implicit completion evidence so the outer
-        // generator can synthesize exactly one truthful terminal event.
-        let terminalEmitted = false;
+        // A terminal event makes the host eligible for continuation. Hold
+        // failure evidence until the SDK iterator exits (and on normal EOF
+        // awaits the CLI exit), so the thread writer is not still active.
+        let pendingTerminal: Extract<NormalizedEvent, { kind: "done" }> | null = null;
         let turnCompleted = false;
         let finalAssistantText: string | null = null;
         try {
           for await (const evt of runResult.events as AsyncIterable<ThreadEvent>) {
             if (ac.signal.aborted) break;
-            if (evt.type === "turn.completed") turnCompleted = true;
             if (evt.type === "error") streamErrors.push(evt.message);
-            const normalized = translator.translate(evt).map((e) => e.kind === "done"
-              ? tagTerminalProvenance(e.reason === "error" ? { ...e,
-                fullError: fullCodexError(e.error ?? "unknown", streamErrors) } : e, "adapter")
-              : e);
+            // Drain after fatal evidence without forwarding stale activity.
+            if (pendingTerminal) continue;
+            if (evt.type === "turn.completed") turnCompleted = true;
+            const normalized = translator.translate(evt);
             for (const e of normalized) {
+              if (e.kind === "done") {
+                pendingTerminal = e;
+                continue;
+              }
               if (e.kind === "text" && e.role === "assistant" && e.text.trim()) {
                 finalAssistantText = e.text.trim();
               }
-              if (e.kind === "done") terminalEmitted = true;
               yield e;
             }
           }
@@ -275,12 +265,14 @@ class CodexHarness implements AgentHarness {
           // Same reasoning as the runStreamed catch above: an abort that
           // cancels in-flight `await for` iteration commonly bubbles as a
           // rejection. Treat it as an abort, not an error.
-          if (ac.signal.aborted) {
+          if (ac.signal.aborted && !pendingTerminal) {
             yield tagTerminalProvenance({ kind: "done", reason: "abort" }, "adapter");
             return;
           }
           if (isBenignWindowsTaskkillParseError(errorMessage(err))) {
-            if (!terminalEmitted) {
+            if (pendingTerminal) {
+              yield codexDoneError(pendingTerminal.error ?? "unknown", streamErrors);
+            } else {
               yield tagTerminalProvenance({
                 kind: "done",
                 reason: turnCompleted ? "completed" : "stop",
@@ -289,11 +281,19 @@ class CodexHarness implements AgentHarness {
             }
             return;
           }
-          yield codexDoneError(errorMessage(err), streamErrors);
+          yield codexDoneError(pendingTerminal?.error ?? errorMessage(err),
+            pendingTerminal ? [...streamErrors, errorMessage(err)] : streamErrors);
           return;
         }
 
-        if (terminalEmitted) return;
+        if (pendingTerminal) {
+          yield codexDoneError(pendingTerminal.error ?? "unknown", streamErrors);
+          return;
+        }
+        if (!ac.signal.aborted && !turnCompleted && streamErrors.length > 0) {
+          yield codexDoneError(streamErrors[streamErrors.length - 1]!, streamErrors);
+          return;
+        }
         yield tagTerminalProvenance(ac.signal.aborted
           ? { kind: "done", reason: "abort" }
           : { kind: "done", reason: turnCompleted ? "completed" : "stop",

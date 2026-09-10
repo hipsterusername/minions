@@ -33,6 +33,7 @@ dist/
 /docs/features/*
 !/docs/features/canvas-zones.md
 !/docs/features/activity-surface-assessment.md
+!/docs/features/selection-controls-audit.md
 !/docs/images/
 /docs/images/*
 !/docs/images/getting-started-*.png

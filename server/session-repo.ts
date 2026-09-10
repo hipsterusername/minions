@@ -307,11 +307,11 @@ export function appendEvent(
   sessionKey: string,
   eventType: string,
   payload: unknown,
-): void {
+): number {
   const stmt = db.prepare(
     "INSERT INTO event_log (session_key, event_type, payload) VALUES (?, ?, ?)",
   );
-  stmt.run(sessionKey, eventType, JSON.stringify(payload));
+  return Number(stmt.run(sessionKey, eventType, JSON.stringify(payload)).lastInsertRowid);
 }
 
 export function getEvents(

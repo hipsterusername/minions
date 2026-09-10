@@ -14,6 +14,33 @@ function bus() {
 }
 
 describe("work-item production bootstrap", () => {
+  it.each([undefined, "leader-only", "leader-and-minions"] as const)(
+    "launches graph children with the parent's explicit full host scope: %s", async (fullHostScope) => {
+      const db = initDb(":memory:");
+      const parent = new SessionHost("parent", "/repo");
+      const requested = { filesystemScope: "unrestricted", approvalPolicy: "on-failure",
+        ...(fullHostScope ? { fullHostScope } : {}) } as const;
+      parent.sandboxPolicy = { requested,
+        effective: { filesystemScope: "unrestricted", approvalPolicy: "on-failure" }, unsupported: [] };
+      const launch = vi.fn();
+      const runtime = bootstrapWorkItemRuntime({ db, bus: bus(),
+        registry: { get: () => parent }, launch });
+      const detail = await runtime.workItems.create({ requestId: "create-sandbox",
+        projectId: "project", projectPath: "/repo", title: "Sandbox", changeMode: "live" });
+      for (const filesystemScope of ["read-only", "workspace-write"] as const) {
+        await runtime.launchRun({ workItemId: detail.workItem.id, runKey: `child-${filesystemScope}`,
+          parentRunKey: parent.id, taskId: "task", prompt: "Use host tools", invocationKind: "new_run",
+          sandboxPolicy: { filesystemScope, approvalPolicy: "never" } });
+        expect(launch).toHaveBeenLastCalledWith(expect.objectContaining({ sandboxPolicy:
+          fullHostScope === "leader-and-minions"
+            ? { filesystemScope: "unrestricted", approvalPolicy: "never", fullHostScope }
+            : { filesystemScope, approvalPolicy: "never" },
+        }));
+      }
+      db.close();
+    },
+  );
+
   it("derives stable globally namespaced UUID-style keys", () => {
     expect(workItemRequestKey("work_item", "request-1"))
       .toBe(workItemRequestKey("work_item", "request-1"));

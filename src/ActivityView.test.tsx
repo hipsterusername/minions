@@ -1,3 +1,5 @@
+import { activeWorkspaceId, createZone, visibleZoneNodes } from "./canvas-zones.ts";
+import { canvasReducer } from "./canvas-state.ts";
 import { createReplaySocket } from "../tests/harness/ws-replay.ts";
 import { canonicalLeaderResponder } from "../tests/harness/canonical-leader.ts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -82,10 +84,10 @@ function activityList(): HTMLElement {
   return list;
 }
 
-function ReadyLaunchHarness({ children }: { children: ReactNode }) {
+function ReadyLaunchHarness({ children, codex = false }: { children: ReactNode; codex?: boolean }) {
   return <HarnessListProvider connected send={() => {}} subscribe={(listener) => {
-    listener({ type: "harness_list", harnesses: [{ name: "claude",
-      models: [{ id: "opus", label: "Opus" }], builtInTools: [], commands: [], agents: [],
+    listener({ type: "harness_list", harnesses: [{ name: codex ? "codex" : "claude",
+      models: [{ id: codex ? "gpt-6-astra" : "opus", label: codex ? "Astra" : "Opus" }], builtInTools: [], commands: [], agents: [],
       account: { provider: "anthropic" }, capabilities: { mutationInterception: "complete",
         thinking: true, promptCaching: true, mcp: true, permissionPrompts: true,
         resume: true, partialMessages: true, builtInFilesystem: true } }] });
@@ -115,11 +117,12 @@ function sentCommand(socketSend: ReturnType<typeof vi.fn>, type: string) {
 }
 
 describe("ActivityView", () => {
-  it("renders file and web links in the final report", () => {
+  it.each([false, true])("renders file and web links in the final report (JSON: %s)", structured => {
     const path = "/workspace/project/docs/report.md";
+    const summary = `[Completed audit and graph](${path})\n[Website](https://example.com/audit)`;
     render(<ActivityView sessions={[session({ sessionKey: "report-links", taskName: "Audit report",
       projectId: "workspace", reviewLifecycle: { ...completeLifecycle,
-        finalReport: `[Completed audit and graph](${path})\n[Website](https://example.com/audit)`,
+        finalReport: structured ? JSON.stringify({ summary }) : summary,
       },
     })]} nodes={[]} {...noop} />);
     fireEvent.click(screen.getByRole("button", { name: /audit report/i }));
@@ -250,6 +253,13 @@ describe("ActivityView", () => {
           taskName: "Coordinate the graph",
         })]}
         nodes={[leaderNode("graph-run", [], { workItemId: "work-graph" })]}
+        workItemRuns={{ "work-graph": [{
+          runKey: "child-run", workItemId: "work-graph", runKind: "child",
+          parentRunKey: "graph-run", taskId: "node-1", attemptId: "attempt-1-2",
+          attemptNumber: 2, runNumber: null, previousRunKey: null,
+          providerSessionId: null, outcome: "none", startedAt: 1,
+          endedAt: null, finalReport: null,
+        }] }}
         {...noop}
         socketSend={socketSend}
         socketSubscribe={socketSubscribe}
@@ -340,6 +350,19 @@ describe("ActivityView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
     expect(screen.getByRole("dialog", { name: /10-node research graph/i }))
       .toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close graph inspector" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Session details" }));
+    expect(screen.getByText("Child run · Task 1 · Active now")).toBeInTheDocument();
+    expect(screen.queryByText(/Child run.*node-1/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Child run · Task 1" }));
+    expect(graphTab).toHaveAttribute("aria-selected", "true");
+    const inspector = screen.getByRole("dialog", { name: /10-node research graph/i });
+    expect(within(inspector).getByRole("heading", { name: "Task 1" })).toBeInTheDocument();
+    expect(within(inspector).getByRole("button", { name: "Toggle details rail" }))
+      .toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(inspector).getByRole("button", { name: "Close graph inspector" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
+    expect(screen.queryByRole("heading", { name: "Task 1" })).not.toBeInTheDocument();
   });
 
   it("uses the canvas task plan as the canonical 1:1 minion roster", () => {
@@ -1337,34 +1360,114 @@ describe("ActivityView", () => {
     expect(onLaunchLeader).toHaveBeenCalledTimes(1);
   });
 
-  it("commits an Activity leader to Canvas only after its session is initiated", async () => {
+  it("keeps an unfinished leader as a resumable draft while browsing Activity or Canvas", () => {
     const draft = leaderNode("", [], { sessionKey: null, status: "disconnected" });
-    const onCommitLaunchLeader = vi.fn();
+    const onLaunchLeader = vi.fn(() => draft);
+    const onDraftPresenceChange = vi.fn();
+    const props = { ...noop, sessions: [session({ sessionKey: "other", taskName: "Existing work" })],
+      nodes: [createZone("release", "Release")], onLaunchLeader, onDraftPresenceChange };
+    const view = render(<ActivityView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /leader prompt/i }), { target: { value: "Keep my exact draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /name optional/i }), { target: { value: "Release prep" } });
+    fireEvent.click(screen.getByRole("button", { name: "Workspace Global" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose Release" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to activity" }));
+
+    const notice = screen.getByRole("region", { name: "Leader draft" });
+    expect(notice).toHaveTextContent("Release prep");
+    expect(screen.queryByRole("region", { name: "New leader" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: /leader prompt/i })).toBeNull();
+    fireEvent.click(within(notice).getByRole("button", { name: "Resume draft" }));
+    expect(screen.getByRole("textbox", { name: /leader prompt/i })).toHaveValue("Keep my exact draft");
+    expect(screen.getByRole("button", { name: "Workspace Release" })).toBeVisible();
+
+    view.rerender(<ActivityView {...props} active={false} />);
+    view.rerender(<ActivityView {...props} active />);
+    expect(screen.queryByRole("region", { name: "New leader" })).toBeNull();
+    fireEvent.click(within(screen.getByRole("region", { name: "Leader draft" })).getByRole("button", { name: "Resume draft" }));
+    expect(screen.getByRole("textbox", { name: /leader prompt/i })).toHaveValue("Keep my exact draft");
+    expect(screen.getByRole("textbox", { name: /name optional/i })).toHaveValue("Release prep");
+    view.rerender(<ActivityView {...props} active homeRequest={1} />);
+    fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
+    expect(screen.queryByRole("region", { name: "Leader draft" })).toBeNull();
+    expect(onLaunchLeader).toHaveBeenCalledOnce();
+    expect(onDraftPresenceChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("lets a pending launch finish in the background without reopening its panel", () => {
+    const draft = leaderNode("", [], { sessionKey: null, status: "creating" });
+    const props = { ...noop, sessions: [session({ sessionKey: "other", taskName: "Existing work" })],
+      nodes: [draft], onLaunchLeader: () => draft.id };
+    const view = render(<ActivityView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to activity" }));
+    const notice = screen.getByRole("region", { name: "Leader draft" });
+    expect(notice).toHaveTextContent("Starting leader");
+    expect(within(notice).getByRole("button", { name: "View launch" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard draft" })).toBeNull();
+    view.rerender(<ActivityView {...props}
+      nodes={[{ ...draft, data: { ...draft.data as LeaderData, sessionKey: "new-run", status: "running" } }]}
+      sessions={[...props.sessions, session({ sessionKey: "new-run", taskName: "New work" })]} />);
+    expect(screen.queryByRole("region", { name: "Leader draft" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "New leader" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back to activity" })).toBeNull();
+  });
+
+  it("creates a workspace from Activity and commits its leader only after the session is initiated", async () => {
+    const draft = leaderNode("", [], { sessionKey: null, status: "disconnected" });
+    let canvasNodes = canvasReducer([createZone("release", "Release"), createZone("research", "Research")],
+      { type: "SET_ACTIVE_WORKSPACE", id: "research" });
+    const onCommitLaunchLeader = vi.fn((node: CanvasNode, workspaceId: string) => {
+      canvasNodes = canvasReducer(canvasNodes, { type: "ADD_NODE", node, workspaceId });
+    });
     const { socket, replay } = createReplaySocket();
     const socketSend = vi.fn(canonicalLeaderResponder(replay));
-    render(
+    function Harness() {
+      const [nodes, setNodes] = useState(canvasNodes);
+      return (
       <ActivityView
         sessions={[session({ sessionKey: "run", status: "running", taskName: "Working" })]}
-        nodes={[]}
+        nodes={nodes}
         {...noop}
         onLaunchLeader={() => draft}
         onCommitLaunchLeader={onCommitLaunchLeader}
+        onCreateWorkspace={(name) => {
+          const workspace = createZone("workspace-created", name);
+          canvasNodes = canvasReducer(canvasNodes, { type: "ADD_NODE", node: workspace });
+          setNodes(canvasNodes);
+          return workspace.id;
+        }}
         socketSend={socketSend}
         socketSubscribe={socket.subscribe}
         projectId="project-1"
         projectPath="/tmp/project"
-      />, { wrapper: ReadyLaunchHarness },
-    );
+      />);
+    }
+    render(<Harness />, { wrapper: ReadyLaunchHarness });
 
     fireEvent.click(screen.getByRole("button", { name: "New" }));
     expect(onCommitLaunchLeader).not.toHaveBeenCalled();
 
     const launchPanel = screen.getByRole("region", { name: /new leader/i });
+    const workspace = within(launchPanel).getByRole("button", { name: "Workspace Research" });
+    fireEvent.click(workspace);
+    expect(screen.getByRole("button", { name: "Choose Global" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Choose Research" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Choose Release" }));
+    expect(workspace).toHaveAccessibleName("Workspace Release");
     fireEvent.click(within(launchPanel).getByRole("checkbox", { name: /isolated worktree/i }));
     expect(onCommitLaunchLeader).not.toHaveBeenCalled();
     fireEvent.change(within(launchPanel).getByRole("textbox", { name: /leader prompt/i }), {
       target: { value: "Start only when submitted." },
     });
+    fireEvent.click(workspace);
+    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Workspace name" }), { target: { value: "Launch prep" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
+    expect(workspace).toHaveAccessibleName("Workspace Launch prep");
+    expect(within(launchPanel).getByRole("textbox", { name: /leader prompt/i })).toHaveValue("Start only when submitted.");
+    expect(onCommitLaunchLeader).not.toHaveBeenCalled();
     fireEvent.click(within(launchPanel).getByRole("button", { name: /^launch leader$/i }));
 
     await waitFor(() => expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
@@ -1378,7 +1481,9 @@ describe("ActivityView", () => {
         sessionKey: "run-1",
         worktreeIsolation: true,
       }),
-    }));
+    }), "workspace-created");
+    expect(visibleZoneNodes(canvasNodes, "workspace-created").map(node => node.id)).toContain(draft.id);
+    expect(activeWorkspaceId(canvasNodes)).toBe("research");
   });
 
   it("auto-opens a compact launch composer with settings available in one panel", () => {
@@ -1403,7 +1508,9 @@ describe("ActivityView", () => {
     expect(within(setup).getByText("Run configuration")).toBeVisible();
     expect(within(setup).getByRole("combobox", { name: /model/i })).toBeVisible();
     expect(within(setup).getByRole("combobox", { name: /permissions/i })).toBeVisible();
+    expect(within(setup).getByRole("button", { name: "Workspace Global" })).toBeVisible();
     expect(within(setup).getByRole("checkbox", { name: /isolated worktree/i })).toBeVisible();
+    expect(within(setup).queryByText("/tmp/project")).not.toBeInTheDocument();
     expect(within(setup).getByText("Skills")).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /new leader form open/i })).toBeDisabled();
@@ -1515,6 +1622,38 @@ describe("ActivityView", () => {
       workItemId: "work-1",
     })));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it.each(["create_work_item", "attach_work_item_surface", "continue_work_item"])(
+    "keeps a first launch mounted when the roster changes during %s", async (pendingType) => {
+    const draft = leaderNode("", [], { sessionKey: null, status: "disconnected",
+      harness: "codex", model: "gpt-6-astra", worktreeIsolation: false, skillIds: [], skillValues: {} });
+    const { socket, replay } = createReplaySocket();
+    const respond = canonicalLeaderResponder(replay);
+    const socketSend = vi.fn((command: unknown) => {
+      if ((command as { type: string }).type !== pendingType) respond(command);
+    });
+    const cancel = vi.fn();
+    const props = { ...noop, onLaunchLeader: () => draft, onCancelLaunchLeader: cancel,
+      socketSend, socketSubscribe: socket.subscribe, projectId: "project-1", projectPath: "/tmp/project" };
+    const { rerender } = render(<ActivityView sessions={[]} nodes={[]} {...props} />,
+      { wrapper: ({ children }) => <ReadyLaunchHarness codex>{children}</ReadyLaunchHarness> });
+    const prompt = screen.getByRole("textbox", { name: /leader prompt/i });
+    fireEvent.change(prompt, { target: { value: "Keep the selected launch settings" } });
+    fireEvent.click(screen.getByRole("button", { name: /^launch leader$/i }));
+    await waitFor(() => expect(sentCommand(socketSend, pendingType)).toBeDefined());
+    const pending = sentCommand(socketSend, pendingType);
+    rerender(<ActivityView sessions={[session({ sessionKey: "work-item:work-1", workItemId: "work-1",
+      canonicalWorkItem: true, status: "idle", taskName: "New task" })]} nodes={[]} {...props} />);
+    // Roster updates must neither relocate the requester nor cancel its in-flight launch.
+    expect(screen.getByRole("textbox", { name: /leader prompt/i })).toBe(prompt);
+    expect(cancel).not.toHaveBeenCalled();
+    socketSend.mockImplementation(respond);
+    await act(async () => { respond(pending); });
+    await waitFor(() => expect(socketSend).toHaveBeenCalledWith(expect.objectContaining({
+      type: "continue_work_item", harness: "codex", model: "gpt-6-astra",
+      prompt: "Keep the selected launch settings",
+    })));
   });
 
   it("selects the newly created leader in Activity when its session appears", () => {

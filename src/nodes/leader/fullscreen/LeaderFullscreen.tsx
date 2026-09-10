@@ -80,6 +80,7 @@ export interface LeaderFullscreenProps {
   dashboardSlot?: ReactNode;
   minionsSlot?: ReactNode;
   configSlot?: ReactNode;
+  changesSlot?: ReactNode;
   actionsSlot?: ReactNode;
   contextItems?: ContextItem[] | undefined;
   toolbarSlot: ReactNode;
@@ -296,7 +297,7 @@ export function LeaderFullscreen(props: LeaderFullscreenProps) {
           <div className="leader-fs-pane-heading"><span>Context & controls</span><button className="leader-fs-icon" aria-label="Close context panel" onClick={() => closeSide("context")}>×</button></div>
           <ContextDrawer data={data} onUpdateData={onUpdateData} skillFlyoutAnchorRef={skillFlyoutAnchorRef}
             onOpenSkillFlyout={onOpenSkillFlyout} graphProjection={graphProjection} onOpenGraph={onOpenGraph}
-            configSlot={configSlot} contextItems={contextItems} reviewRequest={reviewRequest} />
+            configSlot={configSlot} changesSlot={contextHidden ? null : props.changesSlot} contextItems={contextItems} reviewRequest={reviewRequest} />
         </div>
       </div>
     </div>, document.body,

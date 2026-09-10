@@ -6,6 +6,7 @@ import {
   type LeaderTranscriptMode,
 } from "./transcript-builder.ts";
 import type { DisplayMessage } from "../../sdk-messages.ts";
+import { buildSessionContext } from "./session-context.ts";
 
 function message(
   role: DisplayMessage["role"],
@@ -21,6 +22,21 @@ function message(
 }
 
 describe("buildLeaderTranscript", () => {
+  it("excludes saved archive placeholders from all prompt paths while preserving user discussion", () => {
+    const link = "[Read archived event (16384 bytes)](/api/history/run-00000000-0000-4000-8000-000000000001/events/42)";
+    const preview = "[Archive preview] Archived event (12891 bytes). [Download exact event JSON](/api/history/s/events/1)\n\nRAW_TOOL_OUTPUT";
+    const messages = [message("user", "Continue the work"), message("assistant", "Useful conclusion"),
+      message("assistant", link), message("result", link), message("system", link),
+      message("assistant", preview), message("thinking", link)];
+    for (const text of [buildLeaderTranscript(messages, "lean"), buildLeaderTranscript(messages, "full"), buildSessionContext(messages)]) {
+      expect(text).toContain("Useful conclusion");
+      expect(text).not.toContain("/api/history/");
+      expect(text).not.toContain("RAW_TOOL_OUTPUT");
+    }
+    expect(buildLeaderTranscript([message("user", link)], "lean")).toContain(link);
+    expect(buildSessionContext([message("user", link)])).toContain(link);
+    expect(buildLeaderTranscript([message("assistant", `Investigating this placeholder: ${link}`)], "lean")).toContain("Investigating");
+  });
   it("in lean mode includes user and assistant messages but excludes thinking and tool messages", () => {
     const transcript = buildLeaderTranscript([
       message("user", "Start here"),

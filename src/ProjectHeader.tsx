@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
-import { Activity, Check, ChevronDown, FolderKanban, LayoutGrid, Pencil } from "lucide-react";
+import { Activity, Check, ChevronDown, Folder, FolderKanban, LayoutGrid, Pencil } from "lucide-react";
 import { CrewIcon } from "./components/CrewIcon.tsx";
 import { LeaderStatusIcon } from "./nodes/leader/LeaderStatusIcon.tsx";
 import type { SaveStatus } from "./use-autosave.ts";
@@ -343,6 +343,9 @@ export function ProjectHeader({
                         if (!current) onSwitchProject(project.id, project.path);
                       }}
                     >
+                      <span className="project-switcher__project-icon" aria-hidden="true">
+                        <Folder size={16} strokeWidth={1.75} />
+                      </span>
                       <span className="project-switcher__project-copy">
                         <span className="project-switcher__project-name">
                           {current ? name : project.name}
@@ -350,7 +353,9 @@ export function ProjectHeader({
                         <span className="project-switcher__project-path">{project.path}</span>
                         <ProjectAgentPreview project={project} sessions={sessions} />
                       </span>
-                      {current ? <Check size={14} strokeWidth={2} aria-hidden="true" /> : null}
+                      <span className="project-switcher__project-check" aria-hidden="true">
+                        {current ? <Check size={14} strokeWidth={2} /> : null}
+                      </span>
                     </button>
                   );
                 })}

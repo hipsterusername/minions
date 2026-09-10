@@ -8,6 +8,20 @@ import type { ApprovalPolicy, SandboxPolicy } from "../../shared/workspace-contr
 /** Explicit input accepted at the session boundary. */
 export type HarnessSandboxPolicyInput = SandboxPolicy;
 
+/** Only an explicit user opt-in extends full host access to child executions. */
+export function sandboxPolicyForMinion(
+  parent: SandboxPolicy | undefined,
+  child: SandboxPolicy | undefined,
+): SandboxPolicy | undefined {
+  if (parent?.filesystemScope !== "unrestricted"
+    || parent.fullHostScope !== "leader-and-minions") return child;
+  return {
+    filesystemScope: "unrestricted",
+    approvalPolicy: child?.approvalPolicy ?? parent.approvalPolicy,
+    fullHostScope: "leader-and-minions",
+  };
+}
+
 export function approvalPolicyForPermission(
   mode: NormalizedPermissionMode | undefined,
 ): ApprovalPolicy {
@@ -39,6 +53,7 @@ export function resolveHarnessSandboxPolicy(input: {
     filesystemScope,
     approvalPolicy: input.requested?.approvalPolicy
       ?? approvalPolicyForPermission(input.permissionMode),
+    ...(input.requested?.fullHostScope ? { fullHostScope: input.requested.fullHostScope } : {}),
   };
   const unsupported: string[] = [];
   const support = input.support;

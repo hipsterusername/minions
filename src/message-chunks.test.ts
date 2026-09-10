@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { joinSelectedChunks, parseMessageChunks } from "./message-chunks.ts";
 
 describe("parseMessageChunks", () => {
+  it("keeps formatted JSON with blank lines whole for rendering and copying", () => {
+    const report = '{\n  "summary": "Completed",\n\n  "nextSteps": ["Review"]\n}';
+    const chunks = parseMessageChunks(report);
+    expect(chunks).toHaveLength(1);
+    expect(joinSelectedChunks(chunks, new Set([chunks[0]!.id]))).toBe(report);
+  });
+
   it("groups markdown into copyable semantic chunks", () => {
     const chunks = parseMessageChunks([
       "# Plan",

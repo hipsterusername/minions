@@ -7,6 +7,51 @@ import type { LeaderData } from "./types.ts";
 import { useCanvasWorkItem } from "./use-canvas-work-item.ts";
 
 describe("useCanvasWorkItem", () => {
+  it("keeps requests pending across ordinary renders and socket resubscriptions", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const subscribe = (listener: (message: unknown) => void) => {
+      listeners.add(listener); return () => { listeners.delete(listener); };
+    };
+    const socketSend = vi.fn();
+    const dataRef = { current: {} as LeaderData };
+    const { result, rerender } = renderHook(({ socketSubscribe }) => useCanvasWorkItem({
+      nodeId: "leader-1", projectId: "project-1", projectPath: "/repo", socketSend,
+      socketSubscribe, dataRef, emitUpdate: vi.fn(), publishCanvasContext: vi.fn(),
+    }), { initialProps: { socketSubscribe: subscribe } });
+    const resolved = vi.fn();
+    const rejected = vi.fn();
+    void result.current.requestWorkItem({ type: "create_work_item", requestId: "pending" })
+      .then(resolved, rejected);
+    rerender({ socketSubscribe: (listener) => subscribe(listener) });
+    await act(async () => { for (const listener of listeners) listener({
+      type: "work_item_response", requestId: "pending", success: true,
+      result: { workItem: { id: "work-1" } },
+    }); });
+    expect(resolved).toHaveBeenCalledExactlyOnceWith({ workItem: { id: "work-1" } });
+    expect(rejected).not.toHaveBeenCalled();
+    expect(socketSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects pending work on a real unmount and stops receipt polling", async () => {
+    vi.useFakeTimers();
+    try {
+      const socketSend = vi.fn();
+      const { result, unmount } = renderHook(() => useCanvasWorkItem({
+        nodeId: "leader-1", projectId: "project-1", projectPath: "/repo", socketSend,
+        socketSubscribe: () => () => {}, dataRef: { current: {} as LeaderData },
+        emitUpdate: vi.fn(), publishCanvasContext: vi.fn(),
+      }));
+      const rejected = vi.fn();
+      void result.current.requestWorkItem({ type: "create_work_item", requestId: "pending" }).catch(rejected);
+      unmount();
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+      expect(rejected).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        message: "Canvas work-item requester unmounted",
+      }));
+      expect(socketSend).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("keeps a slow launch pending and recovers its receipt after the old deadline", async () => {
     vi.useFakeTimers();
     try {

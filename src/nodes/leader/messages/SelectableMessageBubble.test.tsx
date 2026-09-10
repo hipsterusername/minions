@@ -28,6 +28,24 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it.each([
+  JSON.stringify({ result: "inconclusive", confidence: 0.98, summary: "Host checks unavailable." }),
+  '{\n  "summary": "Host checks unavailable.",\n\n  "checks": ["Build passed"]\n}',
+])("renders a readable report and copies its original JSON: %s", async content => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  setClipboard({ writeText });
+  const onActivate = vi.fn();
+  render(<SelectableMessageBubble msg={{ ...msg, content }} selection={null}
+    onActivate={onActivate} onSelectionChange={() => {}} onExit={() => {}} />);
+  expect(screen.getByText("Host checks unavailable.")).not.toBeVisible();
+  fireEvent.click(screen.getByText("View report details"));
+  expect(screen.getByText("Host checks unavailable.")).toBeVisible();
+  expect(onActivate).not.toHaveBeenCalled();
+  expect(screen.getAllByTestId("message-chunk")).toHaveLength(1);
+  fireEvent.click(screen.getByTitle("Copy to clipboard"));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(content));
+});
+
 it("leaves selection mode closed when a nested action receives Enter or Space", () => {
   const onActivate = vi.fn();
   render(<SelectableMessageBubble msg={msg} selection={null} onActivate={onActivate}

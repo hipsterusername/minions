@@ -390,12 +390,12 @@ describe("LeaderNode fullscreen cockpit", () => {
     );
   });
 
-  it("does not show an Approval tab for live changes", async () => {
+  it("offers a Changes tab in live mode without treating stale approval as pending", async () => {
     render(<Probe initial={{ worktreeIsolation: false, approvalPending: true }} />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Enter fullscreen" }));
     });
-    expect(screen.queryByTestId("drawer-tab-approval")).toBeNull();
+    expect(screen.getByTestId("drawer-tab-approval")).toHaveTextContent("Workspace changes");
     expect(screen.getByTestId("drawer-panel-overview")).toBeInTheDocument();
   });
 });

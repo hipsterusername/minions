@@ -12,6 +12,19 @@ const minion = node("m", "minion", { leaderId: "a" }, 0, 200);
 const zone = { ...createZone("z", "Release"), data: { version: 1 as const, name: "Release", leaderIds: ["a"] } };
 
 describe("canvas zone persistence and visibility", () => {
+  it("places explicitly assigned nodes in Global or a named workspace without switching canvases", () => {
+    const initial = canvasReducer([createZone("z", "Release")], { type: "SET_ACTIVE_WORKSPACE", id: "z" });
+    const global = canvasReducer(initial, { type: "ADD_NODE", node: a, workspaceId: GLOBAL_WORKSPACE_ID });
+    expect(visibleZoneNodes(global).map(n => n.id)).toEqual(["a"]);
+    expect(activeWorkspaceId(global)).toBe("z");
+    const named = canvasReducer(global, { type: "ADD_NODE", node: b, workspaceId: "z" });
+    expect(visibleZoneNodes(named, "z").map(n => n.id)).toEqual(["b"]);
+    const owned = canvasReducer(named, { type: "ADD_NODE", node: minion, workspaceId: "z" });
+    expect(visibleZoneNodes(owned).map(n => n.id)).toEqual(["a", "m"]);
+    const removed = canvasReducer(named, { type: "ADD_NODE", node: node("late"), workspaceId: "deleted" });
+    expect(visibleZoneNodes(removed).map(n => n.id)).toEqual(["a", "late"]);
+  });
+
   it("preserves library icons through membership changes and saved canvas reloads, with defaults for invalid icons", () => {
     const custom = { ...zone, data: { ...zone.data, icon: "minions:rocket" } };
     const moved = canvasReducer([a, b, custom], { type: "UPDATE_ZONES", zones: moveToZone([custom], ["b"], "z"), moves: [] });

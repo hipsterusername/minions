@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getProjectSettings, listProjects, restartServer, updateProjectSettings } from "../api.ts";
 import MobileApp from "./MobileApp.tsx";
+import { createGraphFixture } from "../task-graph/fixtures.ts";
 import { themeMap } from "../themes.ts";
 
 const send = vi.fn();
@@ -102,6 +103,58 @@ afterEach(() => {
 });
 
 describe("MobileApp", () => {
+
+  it("restores Activity filters and scroll, keeps drafts per session, and uses the same shell for review", async () => {
+    installPushGlobals();
+    vi.mocked(listProjects).mockResolvedValue([
+      { id: "alpha", name: "Alpha", path: "/work/alpha", lastOpened: "2026-06-01T00:00:00.000Z", hasSidecar: true },
+    ]);
+    render(<MobileApp />);
+    fireEvent.click(await screen.findByText("Alpha"));
+    emitSocketMessage({ type: "session_list", sessions: [
+      { sessionKey: "first", sessionId: null, role: "leader", cwd: "/work/alpha", status: "running", taskName: "Repair callback" },
+      { sessionKey: "second", sessionId: null, role: "leader", cwd: "/work/alpha", status: "running", taskName: "Improve navigation" },
+    ] });
+    emitSocketMessage({ type: "approval_requested", sessionKey: "first", summary: "Callback fix ready" });
+    fireEvent.click(screen.getByRole("button", { name: "needs you: 1. Filter activity" }));
+    const activity = screen.getByRole("main", { name: "Activity" });
+    activity.scrollTop = 125;
+    fireEvent.scroll(activity);
+    fireEvent.click(screen.getByText("Repair callback"));
+    expect(screen.getByRole("button", { name: "Back to activity" })).toHaveTextContent("Alpha / Activity");
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Keep first draft" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Switch session" }), { target: { value: "second" } });
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Second draft" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Switch session" }), { target: { value: "first" } });
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Keep first draft");
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    expect(screen.getByRole("heading", { name: "Repair callback", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Changes/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("region", { name: "Review changes" })).toBeInTheDocument();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "merge_worktree" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to activity" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "needs you: 1. Clear filter" })).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByRole("main", { name: "Activity" }).scrollTop).toBe(125);
+    expect(new URL(window.location.href).searchParams.has("session")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    expect(screen.getByRole("region", { name: "Review changes" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Keep first draft");
+  });
+
+  it("revalidates a notification target and keeps stale sessions out of the composer", async () => {
+    installPushGlobals();
+    window.history.replaceState(null, "", "/m?session=missing&review=1");
+    render(<MobileApp />);
+    emitSocketMessage({ type: "session_list", sessions: [] });
+    expect(await screen.findByRole("heading", { name: "Session unavailable" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Message" })).not.toBeInTheDocument();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "get_worktree_diff" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to activity" }));
+    expect(await screen.findByRole("main", { name: "Projects" })).toBeInTheDocument();
+  });
+
   it.each([
     ["daybook", "daybook"],
     ["obsidian", "obsidian"],
@@ -161,7 +214,8 @@ describe("MobileApp", () => {
     await waitFor(() => {
       expect(screen.getByRole("main", { name: "Activity" })).toBeInTheDocument();
     });
-    expect(screen.getByRole("navigation", { name: "Mobile navigation" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Mobile navigation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
     const backButton = screen.getByRole("button", { name: "Back to projects" });
     expect(backButton).toBeInTheDocument();
     expect(screen.getAllByText("Activity").length).toBeGreaterThan(0);
@@ -197,7 +251,7 @@ describe("MobileApp", () => {
     fireEvent.click(emptyAction);
 
     expect(await screen.findByRole("main", { name: "New leader" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Back to activity" })).toBeInTheDocument();
   });
 
   it("opens review mode from a mobile approval deep link", async () => {
@@ -205,9 +259,12 @@ describe("MobileApp", () => {
     window.history.replaceState(null, "", "/m?session=s-1&review=1");
 
     render(<MobileApp />);
+    emitSocketMessage({ type: "session_list", sessions: [{
+      sessionKey: "s-1", sessionId: null, status: "waiting", role: "leader", cwd: "/work/alpha",
+    }] });
 
     await waitFor(() => {
-      expect(screen.getByRole("main", { name: "Review changes" })).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "Review changes" })).toBeInTheDocument();
     });
     expect(screen.getByRole("heading", { name: "s-1" })).toBeInTheDocument();
     expect(send).toHaveBeenCalledWith(
@@ -218,7 +275,7 @@ describe("MobileApp", () => {
     );
   });
 
-  it("hides the app context header while viewing an active session chat", async () => {
+  it("shows a session context header when opening a chat deep link", async () => {
     installPushGlobals();
     window.history.replaceState(null, "", "/m?session=s-1");
 
@@ -255,13 +312,12 @@ describe("MobileApp", () => {
     fireEvent.click(await screen.findByText("Mobile audit"));
     fireEvent.click(screen.getByRole("button", { name: "Back to activity" }));
 
-    const chatTab = screen.getByRole("button", { name: "Chat" });
-    expect(chatTab).toBeEnabled();
-    fireEvent.click(chatTab);
+    const resume = await screen.findByRole("button", { name: /Continue conversation Mobile audit/ });
+    fireEvent.click(resume);
     expect(await screen.findByRole("heading", { name: "Mobile audit" })).toBeInTheDocument();
   });
 
-  it("keeps needs-you work visible in the persistent navigation", async () => {
+  it("keeps needs-you work visible on Activity", async () => {
     installPushGlobals();
     vi.mocked(listProjects).mockResolvedValue([
       { id: "alpha", name: "Alpha", path: "/work/alpha", lastOpened: "2026-06-01T00:00:00.000Z", hasSidecar: true },
@@ -281,7 +337,7 @@ describe("MobileApp", () => {
       }],
     });
 
-    expect(await screen.findByRole("button", { name: "Activity, 1 need you" })).toHaveTextContent("1");
+    expect(await screen.findByRole("button", { name: "needs you: 1. Filter activity" })).toHaveTextContent("1");
   });
 
   it("manages default Minion settings from the mobile settings tab", async () => {
@@ -449,4 +505,48 @@ describe("MobileApp", () => {
       sessionKey: "leader-old",
     });
   });
+});
+
+it("returns from Graph to Work and keeps session navigation usable across history and session switches", async () => {
+  installPushGlobals();
+  vi.mocked(listProjects).mockResolvedValue([
+    { id: "alpha", name: "Alpha", path: "/work/alpha", lastOpened: "2026-06-01T00:00:00.000Z", hasSidecar: true },
+  ]);
+  render(<MobileApp />);
+  fireEvent.click(await screen.findByText("Alpha"));
+  const sessions = [
+    { sessionKey: "first", sessionId: null, role: "leader", cwd: "/work/alpha", status: "running", taskName: "Repair callback", workItemId: "work-graph" },
+    { sessionKey: "second", sessionId: null, role: "leader", cwd: "/work/alpha", status: "running", taskName: "Improve navigation" },
+  ];
+  emitSocketMessage({ type: "session_list", sessions });
+  fireEvent.click(screen.getByText("Repair callback"));
+  const snapshot = createGraphFixture(10);
+  const sendGraph = () => emitSocketMessage({ type: "task_graph_snapshot", workItemId: "work-graph",
+    topic: "work-item:work-graph", cause: "navigation-test", runId: snapshot.graphRunId, revision: snapshot.revision, snapshot, timestamp: 1 });
+  sendGraph();
+  fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Keep my draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Work" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Dashboard/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Graph/ }));
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  act(() => window.history.back());
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getByRole("button", { name: "Work" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("button", { name: /^Dashboard/ })).toHaveAttribute("aria-pressed", "true");
+  act(() => window.history.forward());
+  await screen.findByRole("dialog");
+  fireEvent.click(screen.getByRole("button", { name: "Close graph inspector" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Work" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole("combobox", { name: "Switch session" }), { target: { value: "second" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Switch session" }), { target: { value: "first" } });
+  sendGraph();
+  expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Keep my draft");
+  fireEvent.click(screen.getByRole("button", { name: "Work" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^Dashboard/ })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Back to activity" }));
+  await screen.findByRole("main", { name: "Activity" });
 });

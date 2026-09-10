@@ -98,6 +98,23 @@ describe("durable session naming", () => {
 });
 
 describe("Phase B — minion harness inheritance", () => {
+  it.each([undefined, "leader-only", "leader-and-minions"] as const)(
+    "applies explicit full host scope %s to direct Minion launches", (fullHostScope) => {
+      const calls: StartSessionOptions[] = [];
+      const host = new SessionHost("leader", "/tmp/work");
+      const requested = { filesystemScope: "unrestricted", approvalPolicy: "never",
+        ...(fullHostScope ? { fullHostScope } : {}) } as const;
+      host.sandboxPolicy = { requested,
+        effective: { filesystemScope: "unrestricted", approvalPolicy: "never" }, unsupported: [] };
+      const ctx = buildAgentContext(host, { sessionKey: host.id, prompt: "p", cwd: host.cwd },
+        makeDeps((opts) => calls.push(opts)));
+      ctx.startMinionSession!({ sessionKey: "child", prompt: "do", cwd: host.cwd, systemPrompt: "s" });
+      expect(calls[0]?.sandboxPolicy).toEqual(fullHostScope === "leader-and-minions" ? requested : undefined);
+      ctx.startMinionSession!({ sessionKey: host.id, prompt: "resume", cwd: host.cwd, systemPrompt: "s" });
+      expect(calls[1]?.sandboxPolicy).toEqual(requested);
+    },
+  );
+
   it("routes a bound primary's new child through the durable allocator once", async () => {
     const calls: StartSessionOptions[] = [];
     const deps = makeDeps((opts) => calls.push(opts));

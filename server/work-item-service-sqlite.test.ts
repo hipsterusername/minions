@@ -155,6 +155,22 @@ describe("SqliteWorkItemService", () => {
     });
   });
 
+  it.each([{}, { harness: "claude", model: "opus" }])(
+    "inherits the actual harness and model over previous requested settings %j", async (requested) => {
+    const created = await draft();
+    let current = await service.startRun({ requestId: "defaulted", workItemId: created.workItem.id,
+      prompt: "start", expectedLifecycleRevision: 0, expectedCurrentRunKey: null, ...requested });
+    db.prepare("UPDATE sessions SET harness_name = ?, model = ?, session_id = ? WHERE session_key = ?")
+      .run("codex", "gpt-5.6-sol", "codex-thread", "run-defaulted");
+    current = service.sealPrimaryRun({ workItemId: created.workItem.id, runKey: "run-defaulted",
+      outcome: "error", expectedLifecycleRevision: current.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: "run-defaulted" });
+    await service.startRun({ requestId: "continue-defaulted", workItemId: created.workItem.id,
+      prompt: "continue", expectedLifecycleRevision: current.workItem.lifecycle.lifecycleRevision,
+      expectedCurrentRunKey: "run-defaulted" });
+    expect(launches.at(-1)).toMatchObject({ harness: "codex", model: "gpt-5.6-sol", resumeId: "codex-thread" });
+  });
+
   it("inherits primary settings and only resumes a provider on the same harness", async () => {
     const created = await draft();
     let current = await service.startRun({ requestId: "configured", workItemId: created.workItem.id,

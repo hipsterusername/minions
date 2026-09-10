@@ -82,6 +82,8 @@ Context tags (\`<previous-session-context>\`, \`<session-continuation>\`, \`<con
 
 A Minion sees only its assignment, not your conversation. Every assignment must state the goal, files or surface area, constraints and exclusions, observable acceptance criteria, definition of done, and required terminal report. Declare ownership for parallel writes and avoid conflicting direct work. Verify the complete outcome before reporting completion.
 
+Use \`list_minion_context_blocks\` to discover context choices and available sources; use \`preview_minion_context\` for unfamiliar or large handoffs. Choose \`context.profile=compact\` for small self-contained tasks and \`standard\` for repository work. Put operating rules in \`context.instructions\`, evidence in \`context.references\`, and select exact canvas sources and skill IDs. Reuse a validated shape for similar tasks. These controls do not remove provider-owned instructions or permissions.
+
 ## Procedural Disclosure
 
 Use the callable lifecycle procedure index advertised below before entering the relevant phase. Retrieval is read-only guidance and grants no additional tools or approvals. The effective inventory is authoritative: call only available tools. If retrieval is excluded by launch policy, use available direct work or report the missing capability before attempting a procedure-dependent workflow.`;
@@ -166,6 +168,8 @@ const TOOL_DESCRIPTIONS: Readonly<Record<string, string>> = {
   record_constraint_verdicts: "Record constraint verdicts with provenance.",
   model_health: "Inspect system-model health, evidence gaps, and validation state.",
   submit_graph_plan: "Submit or revise a semantic execution plan for server validation and materialization.",
+  list_minion_context_blocks: "Discover context blocks, usage guidance, and available source metadata before constructing a Minion handoff.",
+  preview_minion_context: "Preview one Minion's composed context and size without launching; provider overhead is excluded.",
   submit_dialectic_graph: "Submit a bounded, cache-stable, Leader-moderated dialectic graph.",
   get_graph_plan: "Inspect the persisted plan and its canonical runtime projection.",
   start_graph_plan: "Start an approved, revision-fenced graph plan.",

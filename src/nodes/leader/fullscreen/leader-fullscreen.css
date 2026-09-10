@@ -12,7 +12,7 @@
 .leader-fs-identity { min-width: 0; flex: 1; font-weight: 650; font-size: 16px; }
 .leader-fs-subtitle { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; margin-top: 5px; color: var(--text-muted); font-weight: 400; }
 .leader-fs-status { text-transform: capitalize; }
-.leader-fs-status[data-active="true"] { color: var(--success-color); }
+.leader-fs-status[data-active="true"] { color: var(--status-running); }
 .leader-fs-session-cost { display: flex; flex-direction: column; text-align: right; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .leader-fs-session-cost span { font-size: 11px; color: var(--text-muted); }
 .leader-fs-body { display: flex; flex: 1; min-height: 0; position: relative; }

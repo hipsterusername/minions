@@ -1,7 +1,7 @@
 id: capability.execution_observability
 type: capability
 name: Execution observability
-summary: Users can monitor authoritative status, transcript, plan, dashboard, usage, reviews, and child activity across reconnects and product surfaces.
+summary: Users can monitor authoritative status, transcript, plan, dashboard, usage, reviews, and child activity across reconnects, with bounded replay and authenticated access to archived output.
 constraints: []
 decisions: [ decision.typed_event_bus ]
 suggested_files: [ src/session-stream.ts, src/SessionPanel.tsx, src/ActivityView.tsx, src/mobile/ActivityScreen.tsx, server/commands/sync-session.ts, server/bus.ts ]
@@ -29,8 +29,8 @@ entry_points:
     tests: [ server/minion-tools.test.ts, server/render-tools.test.ts ]
     flows: [ flow.monitor_execution, flow.delegate_and_steer_minions ]
   - surface: surface.ws_api
-    summary: List and sync host snapshots and fan out typed incremental events.
-    files: [ server/commands/list-sessions.ts, server/commands/sync-session.ts, server/bus.ts ]
+    summary: List and sync host snapshots, page archived history without loading the whole archive, and fan out typed incremental events.
+    files: [ server/commands/list-sessions.ts, server/commands/sync-session.ts, server/routes/history.ts, server/bus.ts ]
     tests: [ server/commands/list-sessions.test.ts, server/commands/sync-session.test.ts, tests/architecture/no-direct-broadcast.test.ts ]
     flows: [ flow.monitor_execution, flow.recover_after_disconnect ]
   - surface: surface.graph_inspector

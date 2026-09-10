@@ -1,11 +1,11 @@
 import { ChatLinkScope } from "../components/ChatLink.tsx";
-import { SimpleMarkdown } from "../components/SimpleMarkdown.tsx";
+import { AgentMessageText } from "../components/AgentMessageText.tsx";
 import { CrewIcon } from "../components/CrewIcon.tsx";
 import { useChatFollow } from "./use-chat-follow.ts";
 import { ChatFollow } from "./ChatFollow.tsx";
 import { FormSubmissionProvider } from "../nodes/render/FormSubmissionProvider.tsx";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, FormEvent, TouchEvent as ReactTouchEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, FormEvent, ReactNode, TouchEvent as ReactTouchEvent } from "react";
 
 import type { DisplayMessage } from "../sdk-messages.ts";
 import { copyText } from "../components/CopyButton.tsx";
@@ -43,12 +43,39 @@ import {
   activeMinionSummary,
   sessionDisplayTitle,
   sessionRoleLabel,
+  sessionStatusLabel,
 } from "./mobile-selectors.ts";
 
 /** Statuses where the leader is actively doing work right now. */
 const LEADER_LIVE_STATUSES = new Set(["running", "creating", "waiting"]);
 
+import type { SessionView } from "./use-mobile-navigation.ts";
+import type { PendingApproval } from "./mobile-approvals.ts";
+import type { ChatFollowMemory } from "../use-chat-follow.ts";
+
+export interface SessionViewMemory {
+  prompt?: string;
+  attachments?: ImageAttachment[];
+  textAttachments?: TextAttachment[];
+  reading?: ChatFollowMemory;
+  workTab?: ChatTab;
+}
+
 interface SessionChatScreenProps {
+  projectName?: string | undefined;
+  connected?: boolean;
+  reconnectState?: string;
+  onReconnect?: () => void;
+  view?: SessionView;
+  onViewChange?: (view: SessionView) => void;
+  onCloseGraph?: () => void;
+  memory?: SessionViewMemory;
+  approval?: PendingApproval | undefined;
+  onOpenReview?: () => void;
+  changes?: ReactNode;
+  changeMode?: "live" | "worktree" | undefined;
+  unavailable?: boolean;
+  loading?: boolean;
   sessionKey: string;
   session?: MobileSessionInfo | undefined;
   sessionOptions?: MobileSessionInfo[] | undefined;
@@ -58,7 +85,7 @@ interface SessionChatScreenProps {
   onSelectSession?: ((sessionKey: string) => void) | undefined;
 }
 
-type ChatTab = "chat" | "plan" | "graph" | "dashboard";
+type ChatTab = "plan" | "dashboard";
 
 const GRAPH_PLAN_STATUSES = new Set<GraphPlanItem["status"]>([
   "planned", "starting", "running", "blocked", "completed", "failed",
@@ -142,7 +169,7 @@ export function MessageBubble({ message, detail = false }: { message: DisplayMes
         <span className="mob-message-label-text">{label}</span>
       </div>
       <div className="mob-message-content">
-        {message.role === "assistant" || message.role === "result" ? <SimpleMarkdown text={body} /> : body}
+        {message.role === "assistant" || message.role === "result" ? <AgentMessageText text={body} /> : body}
       </div>
       {message.suffix ? <div className="mob-message-suffix">{message.suffix}</div> : null}
     </>
@@ -512,10 +539,10 @@ function PlanTaskRow({ task }: { task: SyncTaskRecord }) {
           </p>
         ) : null}
         {task.result ? (
-          <p>
+          <div className="mob-plan-result">
             <span>Result</span>
-            {task.result}
-          </p>
+            <AgentMessageText text={task.result} />
+          </div>
         ) : null}
         {task.minionSessionKey ? <code>{task.minionSessionKey}</code> : null}
       </div>
@@ -639,7 +666,11 @@ export function mobileDashboardColumns(): number {
   return 1;
 }
 
-export function SessionChatScreen({
+export function SessionChatScreen(props: SessionChatScreenProps) {
+  return <SessionChatContent key={props.sessionKey} {...props} />;
+}
+
+function SessionChatContent({
   sessionKey,
   session,
   sessionOptions = [],
@@ -647,18 +678,33 @@ export function SessionChatScreen({
   send,
   onBack,
   onSelectSession,
+  projectName, connected = true, reconnectState = "connected", onReconnect,
+  view, onViewChange, onCloseGraph, memory, approval, onOpenReview, changes, changeMode, unavailable = false, loading = false,
 }: SessionChatScreenProps) {
   const [state, setState] = useState<SessionStreamState>(() =>
     emptySessionStreamState(sessionKey),
   );
-  const [prompt, setPrompt] = useState("");
-  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-  const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
+  const [prompt, setPrompt] = useState(memory?.prompt ?? "");
+  const [attachments, setAttachments] = useState<ImageAttachment[]>(memory?.attachments ?? []);
+  const [textAttachments, setTextAttachments] = useState<TextAttachment[]>(memory?.textAttachments ?? []);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
-  const [activeTab, setActiveTab] = useState<ChatTab>("chat");
+  const [localView, setLocalView] = useState<SessionView>("chat");
+  const [workTab, setWorkTab] = useState<ChatTab>(memory?.workTab ?? "plan");
+  const selectedView = view ?? localView;
+  const workspaceView = selectedView === "graph" ? "work" : selectedView;
+  const changeView = (next: SessionView) => { setLocalView(next); onViewChange?.(next); };
+  const activeTab = workspaceView === "work" ? workTab : workspaceView;
+  const closeGraph = () => {
+    if (onCloseGraph) onCloseGraph();
+    else changeView("work");
+  };
+  const [reading] = useState<ChatFollowMemory>(() => memory?.reading ?? {});
+  useLayoutEffect(() => {
+    if (memory) Object.assign(memory, { prompt, attachments, textAttachments, reading, workTab });
+  }, [memory, prompt, attachments, textAttachments, reading, workTab]);
   const groupedMessages = useMemo(() => groupMobileMessages(state.messages), [state.messages]);
-  const follow = useChatFollow(sessionKey, `${state.messages.length}:${state.streamingText}`, activeTab === "chat");
+  const follow = useChatFollow(sessionKey, `${state.messages.length}:${state.streamingText}`, activeTab === "chat", reading);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const renderState = session?.renderState ?? emptyRenderState();
   const graph = useTaskGraphView({
@@ -669,12 +715,7 @@ export function SessionChatScreen({
 
   useEffect(() => {
     setState(emptySessionStreamState(sessionKey));
-    setActiveTab("chat");
   }, [sessionKey]);
-
-  useEffect(() => {
-    if (activeTab === "graph" && !graph.snapshot) setActiveTab("chat");
-  }, [activeTab, graph.snapshot]);
 
   useSessionStream({
     socketSend: send,
@@ -693,7 +734,7 @@ export function SessionChatScreen({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = prompt.trim();
-    if (!trimmed && attachments.length === 0 && textAttachments.length === 0) return;
+    if (unavailable || loading || !connected || (!trimmed && attachments.length === 0 && textAttachments.length === 0)) return;
     send({
       type: "send_message",
       sessionKey,
@@ -747,7 +788,7 @@ export function SessionChatScreen({
     setTextAttachments((current) => current.filter((_, i) => i !== index));
   }
 
-  const canSend = prompt.trim().length > 0 || attachments.length > 0 || textAttachments.length > 0;
+  const canSend = connected && !unavailable && !loading && (prompt.trim().length > 0 || attachments.length > 0 || textAttachments.length > 0);
   const promptLength = prompt.trim().length;
   const activeMinions = session?.role === "leader" ? (session.activeMinions ?? []) : [];
   const taskPlan = session?.role === "leader" ? (session.taskPlan ?? []) : [];
@@ -770,57 +811,68 @@ export function SessionChatScreen({
   return (
     <ChatLinkScope project={session?.projectId} cwd={session?.cwd}>
     <main className="mob-chat" aria-label="Session chat">
+      <div className="mob-session-context">
+        <button type="button" onClick={onBack} aria-label="Back to activity">
+          <span aria-hidden="true">←</span> {projectName ?? "Projects"} / Activity
+        </button>
+        <span role="status" className="mob-session-connection" data-connected={connected}>
+          {connected ? "Connected" : reconnectState}
+        </span>
+        {!connected && onReconnect ? <button type="button" onClick={onReconnect}>Reconnect</button> : null}
+      </div>
       <header className="mob-chat-header">
-        <button className="mob-icon-button" type="button" onClick={onBack} aria-label="Back to activity">
-          ←
-        </button>
         <div className="mob-chat-title">
-          <span>{session ? sessionRoleLabel(session) : "Session"}</span>
-          <h1 className={onSelectSession && switchableSessions.length > 1 ? "mob-visually-hidden" : undefined}>{title}</h1>
-          {onSelectSession && switchableSessions.length > 1 ? (
-            <label className="mob-session-title-switcher">
-              <select
-                aria-label="Switch session"
-                value={sessionKey}
-                onChange={(event) => onSelectSession(event.currentTarget.value)}
-              >
-                {switchableSessions.map((option) => (
-                  <option value={option.sessionKey} key={option.sessionKey}>
-                    {sessionDisplayTitle(option)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+          <h1>{title}</h1>
+          <span className="mob-session-status">{loading ? "Loading session…" : unavailable ? "Session unavailable" : `${session ? sessionStatusLabel(session.status) : "Session"}${session ? ` · ${sessionRoleLabel(session)}` : ""}`}</span>
         </div>
-        <button
-          className="mob-stop-button"
-          type="button"
-          disabled={!canStop}
-          onClick={() => send({ type: "stop_session", sessionKey })}
-        >
-          Stop
-        </button>
+        {onSelectSession && switchableSessions.length > 1 ? (
+          <label className="mob-session-switch-control" title="Switch session">
+            <span aria-hidden="true">⇅</span>
+            <select aria-label="Switch session" value={sessionKey}
+              onChange={(event) => onSelectSession(event.currentTarget.value)}>
+              {!switchableSessions.some((option) => option.sessionKey === sessionKey) ? <option value={sessionKey}>{title}</option> : null}
+              {switchableSessions.map((option) => <option value={option.sessionKey} key={option.sessionKey}>{sessionDisplayTitle(option)}</option>)}
+            </select>
+          </label>
+        ) : null}
+        <button className="mob-stop-button" type="button" disabled={!canStop || !connected}
+          onClick={() => send({ type: "stop_session", sessionKey })}>Stop</button>
       </header>
-
-      {isLeader ? (
-        <nav className="mob-chat-tabs" data-has-graph={graph.snapshot ? "true" : "false"} aria-label="Leader session views">
-          <button
-            type="button"
-            aria-pressed={activeTab === "chat"}
-            className="mob-chat-tab"
-            data-active={activeTab === "chat" ? "true" : "false"}
-            onClick={() => setActiveTab("chat")}
-          >
-            Chat
+      <nav className="mob-workspace-tabs" aria-label="Session views">
+        {(["chat", "work", "changes"] as const).map((item) => (
+          <button key={item} type="button" aria-current={workspaceView === item ? "page" : undefined}
+            onClick={() => changeView(item)}>
+            {item === "chat" ? "Chat" : item === "work" ? "Work" : changeMode === "live" ? "Workspace changes" : "Changes"}
+            {item === "changes" && approval ? <span className="mob-count" aria-label="Decision needed">!</span> : null}
           </button>
+        ))}
+      </nav>
+      {!connected ? <p className="mob-session-offline" role="status">Updates may be out of date. Your draft is kept while reconnecting.</p> : null}
+      {unavailable || loading ? <div className="mob-empty" role="status">
+        <h2>{unavailable ? "Session unavailable" : "Loading session…"}</h2>
+        <p>{unavailable ? "This session is no longer available. Return to Activity to choose another task." : "Retrieving the current session."}</p>
+        <button type="button" className="mob-header-action" onClick={onBack}>Return to Activity</button>
+      </div> : null}
+      {approval && workspaceView === "chat" && !unavailable && !loading ? <div className="mob-session-decision">
+        <strong>Changes need your review</strong>
+        <p>{approval.summary}</p>
+        <button type="button" className="mob-header-action mob-primary-action" onClick={onOpenReview}>Review changes</button>
+      </div> : null}
+      {workspaceView === "changes" && !unavailable && !loading ? (
+        <section className="mob-session-changes" aria-label="Session changes">
+          {changes ?? <div className="mob-empty"><h2>No changes to review</h2><p>There are no changes available for review in this session.</p></div>}
+        </section>
+      ) : null}
+      {workspaceView === "work" && !isLeader && !unavailable && !loading ? <div className="mob-empty"><h2>No work plan</h2><p>This session does not have a Leader plan or dashboard.</p></div> : null}
+      {isLeader && workspaceView === "work" ? (
+        <nav className="mob-chat-tabs" data-has-graph={graph.snapshot ? "true" : "false"} aria-label="Leader session views">
           {graph.snapshot ? (
             <button
               type="button"
-              aria-pressed={activeTab === "graph"}
+              aria-haspopup="dialog"
               className="mob-chat-tab"
-              data-active={activeTab === "graph" ? "true" : "false"}
-              onClick={() => setActiveTab("graph")}
+              data-active={selectedView === "graph" ? "true" : "false"}
+              onClick={() => changeView("graph")}
             >
               <CrewIcon size={16} /> Graph
               <span>{graph.snapshot.nodes.length}</span>
@@ -831,7 +883,7 @@ export function SessionChatScreen({
             aria-pressed={activeTab === "plan"}
             className="mob-chat-tab"
             data-active={activeTab === "plan" ? "true" : "false"}
-            onClick={() => setActiveTab("plan")}
+            onClick={() => setWorkTab("plan")}
           >
             Plan
             {planTotal > 0 ? (
@@ -843,7 +895,7 @@ export function SessionChatScreen({
             aria-pressed={activeTab === "dashboard"}
             className="mob-chat-tab"
             data-active={activeTab === "dashboard" ? "true" : "false"}
-            onClick={() => setActiveTab("dashboard")}
+            onClick={() => setWorkTab("dashboard")}
           >
             Dashboard
             {hasDashboard ? <span>{renderState.components.length}</span> : null}
@@ -851,9 +903,9 @@ export function SessionChatScreen({
         </nav>
       ) : null}
 
-      {isLeader && session ? <LeaderActivityStrip session={session} /> : null}
+      {isLeader && session && workspaceView !== "changes" ? <LeaderActivityStrip session={session} /> : null}
 
-      {activeTab === "chat" ? (
+      {activeTab === "chat" && !unavailable && !loading ? (
         <>
           <div className="mob-chat-feed" ref={follow.feedRef} onScroll={follow.onScroll} tabIndex={-1} aria-label="Conversation">
             {isLeader ? null : <SessionCallout session={session} />}
@@ -875,7 +927,7 @@ export function SessionChatScreen({
                   <span>assistant</span>
                   <span className="mob-stream-dots" aria-hidden="true" />
                 </div>
-                <div className="mob-message-content"><SimpleMarkdown text={state.streamingText} /></div>
+                <div className="mob-message-content"><AgentMessageText text={state.streamingText} /></div>
               </article>
             ) : null}
             {session && LEADER_LIVE_STATUSES.has(session.status) &&
@@ -977,23 +1029,23 @@ export function SessionChatScreen({
         </>
       ) : null}
 
-      {activeTab === "plan" ? (
+      {isLeader && activeTab === "plan" ? (
         <PlanMinionPanel tasks={taskPlan} minions={activeMinions} />
       ) : null}
 
-      {activeTab === "dashboard" ? (
+      {isLeader && activeTab === "dashboard" ? (
         <FormSubmissionProvider key={sessionKey} sessionKey={sessionKey} socketSend={send} socketSubscribe={subscribe}>
         <MobileDashboardPanel renderState={renderState} sessionKey={sessionKey} send={send} />
         </FormSubmissionProvider>
       ) : null}
 
-      {activeTab === "graph" && graph.snapshot ? (
+      {selectedView === "graph" && graph.snapshot && !unavailable && !loading ? (
         <GraphInspector
           snapshot={graph.snapshot}
           goal={session?.taskName}
           plan={graphPlan}
           controlsEnabled={graph.controlsEnabled && !graph.stale}
-          onClose={() => setActiveTab("chat")}
+          onClose={closeGraph}
           onAction={graph.sendAction}
         />
       ) : null}

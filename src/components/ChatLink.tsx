@@ -36,7 +36,9 @@ export function ChatLink({ destination, children }: { destination: string; child
   const context = useContext(ChatLinkContext);
   const target = destination.trim();
   let href: string | null = null;
-  if (/^(https?:\/\/|mailto:)/i.test(target)) {
+  if (/^\/api\/history\/[a-zA-Z0-9_%.-]+(?:\/events\/[1-9]\d*|\?before=[1-9]\d*)?$/.test(target)) {
+    href = target;
+  } else if (/^(https?:\/\/|mailto:)/i.test(target)) {
     href = target;
   } else if (context && !target.startsWith("//") && !target.startsWith("#")
     && (!/^[a-z][a-z\d+.-]*:/i.test(target) || /^file:/i.test(target) || /^[^:/]+\.[^:/]+:\d+(?::\d+)?$/.test(target))) {

@@ -10,7 +10,7 @@ import { selectCanvasChangeMode } from "../work-item.ts";
 type TabId = "overview" | "graph" | "worktree" | "approval" | "skills" | "prompt" | "sources";
 
 export function ContextDrawer({ data, onUpdateData, skillFlyoutAnchorRef,
-  onOpenSkillFlyout, graphProjection, onOpenGraph, configSlot, contextItems = [], reviewRequest = 0,
+  onOpenSkillFlyout, graphProjection, onOpenGraph, configSlot, changesSlot, contextItems = [], reviewRequest = 0,
 }: {
   data: LeaderData;
   onUpdateData: (next: LeaderData) => void;
@@ -19,6 +19,7 @@ export function ContextDrawer({ data, onUpdateData, skillFlyoutAnchorRef,
   graphProjection?: { title: string; status: string; detail: string } | null | undefined;
   onOpenGraph?: (() => void) | undefined;
   configSlot?: ReactNode;
+  changesSlot?: ReactNode;
   reviewRequest?: number;
   contextItems?: ContextItem[] | undefined;
 }) {
@@ -27,14 +28,14 @@ export function ContextDrawer({ data, onUpdateData, skillFlyoutAnchorRef,
   const approvalPending = isWorktreeMode && !!data.approvalPending;
   const [activeTab, setActiveTab] = useState<TabId>(approvalPending ? "approval" : "overview");
   useEffect(() => {
-    if ((!isWorktreeMode && activeTab === "approval") || (!graphProjection && activeTab === "graph")) setActiveTab("overview");
-  }, [activeTab, graphProjection, isWorktreeMode]);
-  useEffect(() => { if (reviewRequest > 0) setActiveTab(isWorktreeMode ? "approval" : "worktree"); }, [reviewRequest, isWorktreeMode]);
+    if (!graphProjection && activeTab === "graph") setActiveTab("overview");
+  }, [activeTab, graphProjection]);
+  useEffect(() => { if (reviewRequest > 0) setActiveTab("approval"); }, [reviewRequest]);
   const tabs: { id: TabId; label: string; badge?: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "sources", label: `Sources · ${contextItems.length}` },
     { id: "worktree", label: "Settings" },
-    ...(isWorktreeMode ? [{ id: "approval" as const, label: "Changes", ...(approvalPending ? { badge: "•" } : {}) }] : []),
+    { id: "approval", label: isWorktreeMode ? "Changes" : "Workspace changes", ...(approvalPending ? { badge: "•" } : {}) },
     ...(graphProjection ? [{ id: "graph" as const, label: "Graph" }] : []),
     { id: "skills", label: `Skills · ${data.skillIds.length}` },
     { id: "prompt", label: "Prompt" },
@@ -59,8 +60,11 @@ export function ContextDrawer({ data, onUpdateData, skillFlyoutAnchorRef,
       {activeTab === "sources" && <SourcesPanel items={contextItems} />}
       {activeTab === "graph" && graphProjection && <GraphPanel projection={graphProjection} onOpen={onOpenGraph} />}
       {activeTab === "worktree" && <WorktreePanel data={data} />}
-      {activeTab === "approval" && <ApprovalPanel data={data} />}
-      <div hidden={activeTab !== "worktree" && activeTab !== "approval"} className="leader-fs-config">{configSlot}</div>
+      {activeTab === "approval" && <>
+        {isWorktreeMode && <ApprovalPanel data={data} />}
+        {changesSlot}
+      </>}
+      <div hidden={activeTab !== "worktree" && (activeTab !== "approval" || !!changesSlot)} className="leader-fs-config">{configSlot}</div>
       {activeTab === "skills" && <SkillsPanel data={data} onUpdateData={onUpdateData} anchorRef={skillFlyoutAnchorRef} onOpen={onOpenSkillFlyout} />}
       {activeTab === "prompt" && <PromptPanel data={data} />}
     </div>

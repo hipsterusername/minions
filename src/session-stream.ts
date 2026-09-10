@@ -29,6 +29,7 @@ import {
 import type { ServerMessage } from "./use-socket.ts";
 import type { ContextDeliveryLedger } from "./context-delivery.ts";
 import type { NormalizedEvent } from "../shared/normalized-event.ts";
+import { isArchiveDisplayMessage } from "./archive-display.ts";
 
 /** Statuses tracked by the shared session stream. */
 export type SessionStreamStatus =
@@ -50,6 +51,7 @@ export type SessionStreamStatus =
 export interface SessionStreamState {
   /** Server-assigned key used to filter inbound WS traffic. */
   sessionKey: string | null;
+  historyHighWater?: number | undefined;
   status: SessionStreamStatus;
   /** Rendered chat feed (deduplicated, collapsed). */
   messages: DisplayMessage[];
@@ -79,7 +81,32 @@ export interface SessionStreamState {
  * @param prefix  passed to `normalizedToDisplayMessages` for stable, scoped IDs
  * @returns       next state, or the same `state` reference if nothing changed
  */
-export function sessionStreamReducer(
+/** Bound client transcript state as well as server replay. The archive remains accessible. */
+export function sessionStreamReducer(state: SessionStreamState, msg: ServerMessage, prefix: string): SessionStreamState {
+  if (msg.type === "sdk_event" && msg.sessionKey === state.sessionKey && msg.historyId !== undefined
+    && msg.historyId <= (state.historyHighWater ?? 0)) return state;
+  if (msg.type === "sync_response" && msg.sessionKey === state.sessionKey && msg.history
+    && msg.history.highWater < (state.historyHighWater ?? 0)) return state;
+  const next = unboundedSessionStreamReducer(state, msg, prefix);
+  if (next === state) return state;
+  let bytes = 0;
+  let start = next.messages.length;
+  while (start > 0 && next.messages.length - start < 200) {
+    const message = next.messages[start - 1]!;
+    const size = JSON.stringify(message).length * 2;
+    if (bytes + size > 512 * 1024) break;
+    bytes += size; start--;
+  }
+  const retained = start ? next.messages.slice(start) : next.messages;
+  const messages = retained.some(isArchiveDisplayMessage) ? retained.filter(message => !isArchiveDisplayMessage(message)) : retained;
+  if (start && state.sessionKey) messages.unshift({ id: `${prefix}-archive`, role: "system", timestamp: 0,
+    content: `[Read session history](/api/history/${encodeURIComponent(state.sessionKey)})` });
+  return { ...next, messages, historyHighWater: msg.type === "sdk_event" ? msg.historyId ?? state.historyHighWater
+    : msg.type === "sync_response" ? msg.history?.highWater ?? state.historyHighWater : state.historyHighWater,
+    streamingText: next.streamingText.slice(-65536) };
+}
+
+function unboundedSessionStreamReducer(
   state: SessionStreamState,
   msg: ServerMessage,
   prefix: string,
@@ -156,7 +183,7 @@ function reduceSyncResponse(
   for (const evt of events) {
     if (evt.type === "sdk_event" && evt.event) {
       const event = evt.event;
-      if (isStreamingEvent(event)) {
+      if (isStreamingEvent(event) && !evt.historyRef) {
         streaming = reduceSdkEvent(streaming, {
           type: "sdk_event", sessionKey: msg.sessionKey, event,
         }, prefix);
@@ -166,7 +193,8 @@ function reduceSyncResponse(
         || event.kind === "thinking" || event.kind === "done") {
         streaming = emptySessionStreamState(state.sessionKey);
       }
-      const produced = normalizedToDisplayMessages(event, prefix);
+      const produced = evt.historyRef ? []
+        : normalizedToDisplayMessages(event, prefix);
       const filtered = collapseAssistantResultDup(rebuilt, produced, event);
       for (const m of filtered.appended) {
         if (!seen.has(m.id)) {
@@ -198,18 +226,20 @@ function reduceSyncResponse(
     }
   }
 
+  if (msg.history?.before) rebuilt.unshift({ id: `${prefix}-archive`, role: "system",
+    content: `[Read earlier session history](${msg.history.url}?before=${msg.history.before})`, timestamp: 0 });
   return {
     ...state,
-    status,
+    status: msg.history ? (msg.status as SessionStreamStatus | undefined) ?? status : status,
     messages: rebuilt.length > 0 ? rebuilt : state.messages,
     contextDelivery: rebuilt.some(m => m.id.startsWith(`${prefix}-checkpoint-`)
       && !state.messages.some(old => old.id === m.id)) ? {} : state.contextDelivery,
     streamingText: streaming.streamingText,
     streamingBlockIndex: streaming.streamingBlockIndex,
-    totalCost: cost,
-    turns,
-    error,
-    fullError,
+    totalCost: msg.history ? msg.totalCost ?? cost : cost,
+    turns: msg.history ? msg.turns ?? turns : turns,
+    error: msg.history && msg.lastError !== undefined ? msg.lastError : error,
+    fullError: msg.history && msg.lastErrorFull !== undefined ? msg.lastErrorFull : fullError,
   };
 }
 
@@ -222,6 +252,13 @@ function reduceSdkEvent(
 ): SessionStreamState {
   if (!state.sessionKey || msg.sessionKey !== state.sessionKey) return state;
   const event: NormalizedEvent = msg.event;
+  if (msg.historyRef) {
+    const clearStreaming = (event.kind === "text" && event.role === "assistant") || event.kind === "thinking" || event.kind === "done";
+    // Still advance the history cursor and completion state without adding prose.
+    return { ...state,
+      ...(event.kind === "done" && event.turns != null ? { turns: event.turns } : {}),
+      ...(clearStreaming ? { streamingText: "", streamingBlockIndex: null } : {}) };
+  }
 
   // ── Streaming deltas ──
   if (isStreamingEvent(event)) {

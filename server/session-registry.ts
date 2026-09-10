@@ -1,7 +1,7 @@
+import { assertWakeStart } from "./wake-coalescer.ts";
 import { startRegisteredSession } from "./session-registry-start.ts";
 import { assertSessionIdentity } from "./leader-identity.ts";
 /** In-memory home for live and hydrated SessionHost instances. */
-
 import {
   SessionHost,
   type SessionHostDeps,
@@ -29,7 +29,6 @@ import { sandboxResolutionSchema } from "../shared/workspace-contracts.ts";
 import { inspectRunRecoveryWitness } from "./work-item-recovery.ts";
 import { recoverDurableWorkflowState } from "./session-registry-recovery.ts";
 import { wakeLeaderFromDurableTaskState } from "./leader-wake.ts";
-
 const log = serverLogger.child("session-registry");
 
 type ArmedPromptHost = SessionHost & {
@@ -148,7 +147,7 @@ export class SessionRegistry {
   start(
     opts: StartSessionOptions,
     reservation?: SessionCapacityReservation,
-  ): void {
+  ): Promise<void> {
     if (!this.deps) {
       throw new Error(
         "SessionRegistry: deps not set — call setDeps() before start().",
@@ -168,6 +167,7 @@ export class SessionRegistry {
     try {
       let host = this.map.get(opts.sessionKey);
       assertSessionIdentity(opts, host);
+      assertWakeStart(opts, host, this.deps);
       if (!host) {
         host = new SessionHost(opts.sessionKey, opts.cwd);
         this.map.set(opts.sessionKey, host);
@@ -194,7 +194,7 @@ export class SessionRegistry {
       // Fire-and-forget; the host fans progress out via the bus. SessionHost
       // marks itself running synchronously before its first async boundary.
       this.releaseCapacity(claimed);
-      startRegisteredSession(host, opts, this.deps);
+      return startRegisteredSession(host, opts, this.deps);
     } catch (error) {
       this.releaseCapacity(claimed);
       throw error;
@@ -219,15 +219,8 @@ export class SessionRegistry {
     const host = this.map.get(sessionKey);
     if (!host) return null;
 
-    const lastEvent = [...host.eventBuffer]
-      .reverse()
-      .find((event) => typeof event.timestamp === "number");
-    const lastActivityAt = lastEvent?.timestamp ?? null;
+    const { lastActivityAt, lastSdkEventKind } = host.historyFacts;
     const now = Date.now();
-    const lastSdkEventKind =
-      lastEvent?.type === "sdk_event" && lastEvent.event
-        ? lastEvent.event.kind
-        : null;
 
     return {
       sessionKey,
@@ -248,7 +241,7 @@ export class SessionRegistry {
         (host.eventStream !== null || host.runControl !== null),
       lastActivityAt,
       lastActivityAgeMs: lastActivityAt === null ? null : now - lastActivityAt,
-      lastEventType: lastEvent?.type ?? null,
+      lastEventType: host.historyFacts.lastEventType,
       lastSdkEventKind,
       lastError: host.lastError,
       lastErrorFull: host.lastErrorFull,
@@ -378,8 +371,8 @@ export class SessionRegistry {
         }
         host.taskState = tasks;
         host.renderState = render;
-        // Restore the event buffer in place — using bufferEvent() here
-        // would re-persist every event we just loaded.
+        // Hydration carries no transcript bodies; durable history is read
+        // on demand without changing workflow reconciliation.
         host.eventBuffer = events;
         if (wasActive) host.persist();
         this.map.set(row.session_key, host);

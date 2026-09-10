@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App, { formatProjectDocumentTitle } from "./App.tsx";
 import { getProject, listProjects, updateProject } from "./api.ts";
 import { useLeaderFullscreenRequest } from "./use-leader-fullscreen-request.ts";
 import type { ActivityViewProps } from "./ActivityView.tsx";
+
+const canvasUnmount = vi.hoisted(() => vi.fn());
 
 vi.mock("./nodes/ClaudeSessionNode.tsx", () => ({}));
 vi.mock("./nodes/LeaderNode.tsx", () => ({}));
@@ -67,6 +69,7 @@ vi.mock("./ProjectHeader.tsx", () => ({
       <button onClick={onBack}>Back To Projects</button>
       <button onClick={() => onSwitchProject("project-2", "/tmp/beta")}>Switch To Beta</button>
       <button onClick={() => onViewChange("canvas")}>Go To Canvas</button>
+      <button onClick={() => onViewChange("activity")}>Go To Activity</button>
     </div>
   ),
 }));
@@ -74,6 +77,7 @@ vi.mock("./ProjectHeader.tsx", () => ({
 
 vi.mock("./Canvas.tsx", () => ({
   Canvas: () => {
+    useEffect(() => () => { canvasUnmount(); }, []);
     const [fullscreen, setFullscreen] = useState(false);
     const returnRef = useRef<(() => void) | undefined>(undefined);
     useLeaderFullscreenRequest("leader-1", onExit => {
@@ -88,9 +92,10 @@ vi.mock("./Canvas.tsx", () => ({
 }));
 
 vi.mock("./ActivityView.tsx", () => ({
-  ActivityView: ({ initialSelectedKey, onExpandFullscreen }: ActivityViewProps) => (
+  ActivityView: ({ initialSelectedKey, onExpandFullscreen, onDraftPresenceChange }: ActivityViewProps) => (
     <div data-testid="activity-view">
       <span>{initialSelectedKey}</span>
+      <input aria-label="Draft prompt" onChange={() => onDraftPresenceChange?.(true)} />
       <button onClick={() => onExpandFullscreen("leader-1", "work-item:work-1")}>Expand fullscreen</button>
     </div>
   ),
@@ -158,6 +163,29 @@ describe("App document title", () => {
       "Alpha Project (Minions)",
     );
     expect(formatProjectDocumentTitle("   ")).toBe("Minions");
+  });
+
+  it.each(["Go To Activity", "Switch To Beta", "Back To Projects"])(
+    "unmounts the canvas when navigating with %s", async (action) => {
+      render(<App />);
+      fireEvent.click(await screen.findByText("Recent Alpha"));
+      fireEvent.click(await screen.findByRole("button", { name: "Go To Canvas" }));
+      expect(screen.getByText("Canvas")).toBeInTheDocument();
+      canvasUnmount.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      expect(canvasUnmount).toHaveBeenCalledOnce();
+      expect(screen.queryByText("Canvas")).toBeNull();
+    });
+
+  it("retains an Activity draft while visiting Canvas", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByText("Recent Alpha"));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Draft prompt" }), { target: { value: "Unfinished work" } });
+    fireEvent.click(screen.getByRole("button", { name: "Go To Canvas" }));
+    expect(screen.getByTestId("activity-view")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Go To Activity" }));
+    expect(screen.getByRole("textbox", { name: "Draft prompt" })).toHaveValue("Unfinished work");
+    expect(screen.getByTestId("activity-view")).toBeVisible();
   });
 
   it("returns from fullscreen to the selected Activity entry on repeated visits", async () => {

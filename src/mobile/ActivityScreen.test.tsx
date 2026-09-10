@@ -79,14 +79,15 @@ describe("ActivityScreen", () => {
     fireEvent.click(card);
     expect(onOpenSession).not.toHaveBeenCalled();
   });
-  it("expands canonical run history and requests subsequent pages", () => {
+  it.each([false, true])("expands canonical run history and requests subsequent pages (JSON: %s)", structured => {
     const load = vi.fn();
+    const summary = "Shipped safely\n[Audit](docs/audit.md:12)";
     render(<ActivityScreen sessions={[session({ sessionKey: "run-2", workItemId: "work-1", taskName: "Task", projectId: "workspace" })]}
       onOpenSession={() => {}} onLoadRuns={load} runNextCursor={{ "work-1": "next" }}
       workItemRuns={{ "work-1": [{ runKey: "run-1", workItemId: "work-1", runKind: "primary",
         parentRunKey: null, taskId: null, runNumber: 1, previousRunKey: null,
         providerSessionId: null, outcome: "completed", startedAt: 1, endedAt: 2,
-        finalReport: "Shipped safely\n[Audit](docs/audit.md:12)" }] }} />);
+        finalReport: structured ? JSON.stringify({ summary }) : summary }] }} />);
     fireEvent.click(screen.getByText("Run history"));
     const history = screen.getByText("Run history").closest("details");
     history!.open = true;

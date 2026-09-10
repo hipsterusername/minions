@@ -57,6 +57,7 @@ export interface GraphInspectorProps extends GraphInspectorCallbacks {
   plan?: readonly GraphPlanItem[];
   goal?: string | null | undefined;
   initialTab?: Tab;
+  initialSelectedNodeId?: string | null;
   controlsEnabled?: boolean;
   retryReceipts?: Record<string, TaskRetryReceipt>;
   onRefresh?: (() => void) | undefined;
@@ -70,18 +71,20 @@ export function GraphInspector({
   plan = [],
   goal,
   initialTab = "topology",
+  initialSelectedNodeId = null,
   controlsEnabled = true,
   retryReceipts = {},
   onRefresh,
 }: GraphInspectorProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [filter, setFilter] = useState<GraphFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    snapshot.nodes.some((node) => node.id === initialSelectedNodeId) ? initialSelectedNodeId : null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const [focusedPlanTaskId, setFocusedPlanTaskId] = useState<string | null>(null);
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth <= 900);
   const [planOpen, setPlanOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 900);
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(selectedId !== null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const filteredNodes = useMemo(() => filterNodes(snapshot.nodes, filter), [snapshot.nodes, filter]);

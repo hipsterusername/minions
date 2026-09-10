@@ -26,12 +26,16 @@ export async function consumeProviderInvocation(input: {
   agentCtx: AgentTypeContext;
   events: AsyncIterable<NormalizedEvent>;
   abortController: AbortController;
+  onAccepted?: () => void;
 }): Promise<{ continuationOpts: StartSessionOptions | null; checkpointInitialized: boolean }> {
   const { host, opts, deps, agentType, agentCtx, events, abortController } = input;
   let continuationOpts: StartSessionOptions | null = null;
   let checkpointInitialized = false;
   for await (const event of events) {
     if (abortController.signal.aborted) break;
+    // Creating an iterable or a thread does not prove prompt acceptance. Wakes
+    // require model output/tool activity or a successful terminal response.
+    if (provesProviderAcceptance(event)) { input.onAccepted?.(); input.onAccepted = undefined; }
     if (event.kind === "done" && shouldRecoverFromContextWindow(opts, event)) {
       continuationOpts = buildContextRecoveryStartOptions(host, opts, event);
       const recoveryEvent = normalizedEventEnvelope(host, {
@@ -54,6 +58,13 @@ export async function consumeProviderInvocation(input: {
   }
   continuationOpts ??= buildPendingCompactionStartOptions(host, opts);
   return { continuationOpts, checkpointInitialized };
+}
+
+function provesProviderAcceptance(event: NormalizedEvent): boolean {
+  if (event.kind === "done") return event.reason === "stop" || event.reason === "completed";
+  if (event.kind === "text") return event.role === "assistant";
+  if (event.kind === "usage") return event.output > 0;
+  return ["text_delta", "thinking", "tool_call", "tool_result", "tool_progress", "agent_spawned"].includes(event.kind);
 }
 
 function recordProviderContinuationBoundary(

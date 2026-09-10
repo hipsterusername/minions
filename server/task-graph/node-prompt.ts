@@ -1,4 +1,5 @@
 import type { GraphRevisionInput } from "../../shared/task-graph-contracts.ts";
+import { buildMinionSystemPrompt, renderMinionReferences } from "../../shared/prompts/minion-context.ts";
 import type { TaskGraphArtifactReference } from "./artifact-access.ts";
 import {artifactContractExample, validateArtifactContract} from "./artifact-contract.ts";
 
@@ -13,6 +14,15 @@ export interface TaskGraphRecoveryDraft {
   attemptId:string;
   finalReport:string;
   stagingFailure?:{missingOutputs:string[];stagedOutputs:string[]}|undefined;
+}
+
+/** Shared by preview and dispatch so instruction/reference placement cannot drift. */
+export function renderTaskGraphNodePrompts(...args: Parameters<typeof renderTaskGraphNodePrompt>): {
+  prompt: string; systemPrompt?: string;
+} {
+  const context = args[1].context;
+  return { prompt: renderTaskGraphNodePrompt(...args),
+    ...(context ? { systemPrompt: buildMinionSystemPrompt(context) } : {}) };
 }
 
 export function renderTaskGraphNodePrompt(
@@ -40,6 +50,7 @@ export function renderTaskGraphNodePrompt(
     inputArtifacts.length
       ? "Read artifact content only through mcp__task-graph__read_input_artifact using the listed artifactId." : "",
     renderScopedContext(scopedContext),
+    renderMinionReferences(node.context),
     `Declared ownership (exact scopes):\n${node.ownershipRequest.map(scope=>`- ${JSON.stringify(scope)}`).join("\n") || "- None; filesystem read-only"}\nOnly declared write scopes authorize changes; read scopes do not grant writes. Preserve authorized reference reads and project constraints.`,
     revision.nonGoals.length
       ? `Non-goals:\n${revision.nonGoals.map((value) => `- ${value}`).join("\n")}` : "",

@@ -5,6 +5,8 @@ import { readSkillSnapshot, saveSkillSnapshot, selectSnapshotSkills } from "../s
  */
 
 import { z } from "zod/v4";
+import { minionContextSchema } from "../../shared/minion-context.ts";
+import { buildMinionSystemPrompt } from "../../shared/prompts/minion-context.ts";
 import { randomUUID } from "node:crypto";
 import { checkAssignmentAdmission, reserveAssignment } from "./assignment-admission.ts";
 import type { NormalizedToolDef } from "../harness/types.ts";
@@ -26,6 +28,8 @@ import {
 } from "../task-lifecycle.ts";
 
 const assignTaskInputSchema = z.object({
+  context: minionContextSchema.optional()
+    .describe("Task-scoped Minions instruction profile, role, operating instructions, and reference data. For minimal handoffs also set inheritSkills=false and include_canvas_context=false."),
   taskId: z
     .string()
     .describe(
@@ -200,7 +204,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const childSnapshotId = saveSkillSnapshot(ctx.projectPath, { version: 1,
         skills: snapshot?.skills ?? skills, values: resolvedSkillValues });
       const skillsAddendum = compileSkills(skills, resolvedSkillValues);
-      const minionSystemPrompt = ctx.minionSystemPrompt + skillsAddendum;
+      const minionSystemPrompt = buildMinionSystemPrompt(args.context, ctx.minionSystemPrompt) + skillsAddendum;
       const settings = readSettings(ctx.projectPath);
       const storedProjectContext = readContext(ctx.projectPath);
       const contextPack = args.workPacketId && settings.systemModel !== "off" && hasSystemModelManifest(ctx.cwd)
@@ -210,6 +214,7 @@ export function createAssignTaskToolDef(ctx: TaskToolContext): NormalizedToolDef
       const canvasContext = args.include_canvas_context === false ? null
         : (ctx.getCanvasContext?.() ?? getSessionCanvasContext(ctx.leaderSessionKey));
       const prompt = buildTaskSpawnPrompt({
+        context: args.context,
         projectContextSourceRef: persistContextSource(ctx.projectPath, storedProjectContext.content),
         canvasContextSourceRef: persistContextSource(ctx.projectPath, canvasContext),
         taskId,

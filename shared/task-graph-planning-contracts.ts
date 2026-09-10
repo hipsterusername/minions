@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { minionContextSchema, minionContextSummarySchema } from "./minion-context.ts";
 import {
   budgetRequestSchema,
   dialecticNodeMetadataSchema,
@@ -45,6 +46,8 @@ export const semanticGraphPlanStepSchema = z.object({
   key: stepKeySchema,
   title: z.string().trim().min(1).max(200),
   objective: z.string().trim().min(1),
+  context: minionContextSchema.optional()
+    .describe("Construct Minions-owned instructions and reference blocks. Use list_minion_context_blocks and preview_minion_context before unfamiliar or large handoffs."),
   acceptanceCriteria: z.array(z.string().trim().min(1)).min(1),
   constraints: z.array(z.string().trim().min(1)).default([]),
   skillIds: z.array(z.string().trim().min(1)).optional()
@@ -179,6 +182,7 @@ export const taskGraphPlanStepViewSchema = z.object({
   acceptanceCriteria: z.array(z.string()),
   dependsOn: z.array(stepKeySchema),
   contextSelectors: z.array(z.string()),
+  contextSummary: minionContextSummarySchema.optional(),
   inputBindings: jsonRecordSchema,
   outputSchemas: jsonRecordSchema,
   outputExamples: jsonRecordSchema,

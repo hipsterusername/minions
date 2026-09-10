@@ -1,3 +1,4 @@
+import type { HistoryWindow, HistoryReference } from "../shared/history.ts";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { getAuthToken, clearAuthToken } from "./api.ts";
 import {
@@ -44,8 +45,8 @@ export type ServerMessage =
   | { type: "session_status"; sessionKey: string; status: string; sessionId?: string }
   | { type: "session_compacted"; sessionKey: string; checkpointId?: string; trigger?: "proactive" | "context_recovery"; oldSessionId: string | null; newSessionId: string | null; contextTokensBefore?: number; contextWindowTokens?: number; ratioBefore?: number; timestamp: number }
   | { type: "session_error"; sessionKey: string; error: string; fullError?: string }
-  | { type: "sdk_event"; sessionKey: string; runKey?: string; workItemId?: string | null; event: NormalizedEvent; timestamp?: number }
-  | { type: "sync_response"; sessionKey: string; runKey?: string; workItemId?: string | null; runKind?: "primary" | "child"; parentRunKey?: string | null; taskId?: string | null; found: boolean; status?: string; sessionId?: string | null; cwd?: string; totalCost?: number; turns?: number; usageTotals?: SessionUsageTotals; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; model?: string | null; permissionMode?: string | null; sandboxPolicy?: SandboxResolution | null; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default"; activeMinions?: ActiveMinion[]; taskPlan?: SyncTaskRecord[]; renderState?: RenderState | null; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown; graceUntil?: number } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null; reviewLifecycle?: SessionReviewLifecycle }
+  | { type: "sdk_event"; sessionKey: string; runKey?: string; workItemId?: string | null; event: NormalizedEvent; timestamp?: number; historyId?: number; historyRef?: HistoryReference }
+  | { type: "sync_response"; sessionKey: string; runKey?: string; workItemId?: string | null; runKind?: "primary" | "child"; parentRunKey?: string | null; taskId?: string | null; found: boolean; status?: string; sessionId?: string | null; cwd?: string; totalCost?: number; turns?: number; usageTotals?: SessionUsageTotals; lastError?: string | null; lastErrorFull?: string | null; events?: SyncEvent[]; history?: HistoryWindow; model?: string | null; permissionMode?: string | null; sandboxPolicy?: SandboxResolution | null; initData?: Record<string, unknown>; taskName?: string | null; role?: "leader" | "minion" | "default"; activeMinions?: ActiveMinion[]; taskPlan?: SyncTaskRecord[]; renderState?: RenderState | null; worktree?: { path: string; branch: string } | null; approval?: { requested?: boolean; summary?: string; diff?: unknown; graceUntil?: number } | null; harness?: string; harnessCapabilities?: HarnessCapabilities | null; reviewLifecycle?: SessionReviewLifecycle }
   | { type: "control_response"; command: string; sessionKey: string | null; requestId: string | null; success: boolean; error?: string; [key: string]: unknown }
   | { type: "session_cleared"; sessionKey: string }
   | { type: "session_task_name"; sessionKey: string; taskName: string }
@@ -69,6 +70,8 @@ export type ServerMessage =
   | { type: "error"; message: string };
 
 export interface SyncEvent {
+  historyId?: number;
+  historyRef?: HistoryReference;
   type: string;
   sessionKey: string;
   /** Canonical identity fields are absent on older replayed events. */

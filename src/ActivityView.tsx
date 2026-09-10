@@ -1,5 +1,7 @@
+import { activeWorkspaceId, GLOBAL_WORKSPACE_ID, readWorkspaces } from "./canvas-zones.ts";
+import { WorkspacePicker } from "./components/WorkspacePicker.tsx";
 import { ChatLinkScope } from "./components/ChatLink.tsx";
-import { SimpleMarkdown } from "./components/SimpleMarkdown.tsx";
+import { AgentMessageText } from "./components/AgentMessageText.tsx";
 import { ActivityLoading, type ActivityLoadingProps } from "./ActivityLoading.tsx";
 import { findUnansweredForms } from "../shared/render-dsl.ts";
 import { CrewIcon } from "./components/CrewIcon.tsx";
@@ -66,6 +68,7 @@ import {
   SessionChangesPanel,
   leaderHasReviewableChanges,
 } from "./ChangesView.tsx";
+import { selectCanvasChangeMode } from "./nodes/leader/work-item.ts";
 import type { ActiveMinion, SocketSubscribe, SyncTaskRecord } from "./use-socket.ts";
 import type { WorkItemRunSnapshot, WorkItemSnapshot } from "../shared/work-item-contracts.ts";
 import { DashboardSurface } from "./nodes/render/DashboardSurface.tsx";
@@ -109,6 +112,9 @@ import "./activity.css";
  */
 
 export interface ActivityViewProps extends ActivityLoadingProps {
+  active?: boolean;
+  homeRequest?: number;
+  onDraftPresenceChange?: (present: boolean) => void;
   /** Initial destination when opening detached work from Canvas. */
   initialSelectedKey?: string | null;
   /** Project-owned request state survives switching to Canvas. */
@@ -118,7 +124,9 @@ export interface ActivityViewProps extends ActivityLoadingProps {
   /** Prepare a fresh Leader draft with the same defaults as Canvas. */
   onLaunchLeader: () => CanvasNode | string | void;
   /** Add an Activity draft to Canvas once its session has been initiated. */
-  onCommitLaunchLeader: (node: CanvasNode) => void;
+  onCommitLaunchLeader: (node: CanvasNode, workspaceId: string) => void;
+  /** Create a workspace and return its ID for the launch destination. */
+  onCreateWorkspace?: ((name: string) => string) | undefined;
   /** Remove an Activity-created draft when launch is cancelled before start. */
   onCancelLaunchLeader: (nodeId: string) => void;
   /** Reveal + center the leader node on the canvas. */
@@ -593,7 +601,8 @@ function Inspector({
   onLoadRuns?: (cursor?: string) => void;
 }) {
   const isRunning = session.status === "running" || session.status === "creating";
-  const showChanges = !!leader && leaderHasReviewableChanges(leader.data);
+  const showChanges = !!leader && !!leader.data.sessionKey
+    && (leaderHasReviewableChanges(leader.data) || selectCanvasChangeMode(leader.data) === "live");
   const minions = selectActivityMinions(session, leader?.data.taskPlan);
   const taskGraphController = useLeaderTaskGraphController({
     workItemId: session.workItemId ?? null,
@@ -918,6 +927,13 @@ function Inspector({
             <section ref={chatFollow.contentRef} className="act-conversation" aria-label="Conversation history" data-activity-target="conversation" tabIndex={-1}>
               {transcriptMessages.length > 0 || streamingText || workItemHistory.orderedRuns.length > 0 ? (
                 <ActivityTranscript unified={Boolean(session.workItemId)} history={workItemHistory}
+                  graphNodes={taskGraphController.snapshot?.nodes}
+                  taskPlan={leader?.data.taskPlan}
+                  onInspectNode={(nodeId) => {
+                    setActiveSideTab("graph");
+                    setCompactPane("context");
+                    taskGraphController.inspectNode(nodeId);
+                  }}
                   currentRunKey={session.sessionKey} currentMessages={transcriptMessages}
                   currentStreamingText={streamingText} thinking={Boolean(awaitingResponse)} />
               ) : (
@@ -1110,12 +1126,14 @@ function Inspector({
                   </section>
                 )}
                 {showChanges && leader && (
-                  <article className="act-content-card" data-activity-target="changes" tabIndex={-1} aria-label="Changes">
+                  <article className="act-content-card" data-activity-target="changes" tabIndex={-1} aria-label={selectCanvasChangeMode(leader.data) === "live" ? "Workspace changes" : "Changes"}>
                     <header className="act-content-card__head">
                       <GitCompare size={16} aria-hidden />
                       <div>
-                        <h4>Changes</h4>
-                        <p>Review the leader’s working tree and integration options.</p>
+                        <h4>{selectCanvasChangeMode(leader.data) === "live" ? "Workspace changes" : "Changes"}</h4>
+                        <p>{selectCanvasChangeMode(leader.data) === "live"
+                          ? "Current edits in the shared workspace."
+                          : "Review the leader’s working tree and integration options."}</p>
                       </div>
                     </header>
                     <div className="act-content-card__body">
@@ -1140,7 +1158,7 @@ function Inspector({
                         <p>The leader’s completed handoff and verification summary.</p>
                       </div>
                     </header>
-                    <div className="act-final-report"><SimpleMarkdown text={session.reviewLifecycle.finalReport} /></div>
+                    <div className="act-final-report"><AgentMessageText text={session.reviewLifecycle.finalReport} /></div>
                   </article>
                 )}
 
@@ -1237,7 +1255,7 @@ function Inspector({
                           {previewRun.finalReport ? (
                             <div className="act-run-preview-report">
                               <strong>Final report</strong>
-                              <div><SimpleMarkdown text={previewRun.finalReport} /></div>
+                              <div><AgentMessageText text={previewRun.finalReport} /></div>
                             </div>
                           ) : null}
                         </section>
@@ -1312,6 +1330,7 @@ function Inspector({
 }
 
 export function ActivityView({
+  active = true, homeRequest = 0, onDraftPresenceChange,
   loading = false, loadError = null, onRetryLoad, connected = true,
   initialSelectedKey = null,
   lifecycleController,
@@ -1319,6 +1338,7 @@ export function ActivityView({
   nodes,
   onLaunchLeader,
   onCommitLaunchLeader,
+  onCreateWorkspace,
   onCancelLaunchLeader,
   onOpenInCanvas,
   onExpandFullscreen,
@@ -1337,6 +1357,7 @@ export function ActivityView({
   const [actionRequest, setActionRequest] = useState<InspectorActionRequest | null>(null);
   const openSessionAction = (session: ActivitySession) => {
     const entryId = activityEntryId(session);
+    setLaunchVisible(false);
     setSelectedKey(entryId);
     setActionRequest({ entryId, action: attentionAction(session) });
   };
@@ -1344,8 +1365,16 @@ export function ActivityView({
   const [startedEntry, setStartedEntry] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<ActivityVisibility>("open");
   const [summaryFilter, setSummaryFilter] = useState<ActivitySummaryFilter | null>(null);
+  const [launchVisible, setLaunchVisible] = useState(false);
   const [launchNodeId, setLaunchNodeId] = useState<string | null>(null);
+  const workspaces = useMemo(() => readWorkspaces(nodes), [nodes]);
+  const activeCanvasWorkspace = activeWorkspaceId(nodes);
+  const [launchWorkspaceId, setLaunchWorkspaceId] = useState(activeCanvasWorkspace);
+  const selectedWorkspaceId = workspaces.some(workspace => workspace.id === launchWorkspaceId)
+    ? launchWorkspaceId : GLOBAL_WORKSPACE_ID;
   const [launchDraft, setLaunchDraft] = useState<CanvasNode | null>(null);
+  // Keep the request owner in the same React subtree as the roster changes.
+  const [launchInEmptyWorkspace, setLaunchInEmptyWorkspace] = useState(true);
   const launchCommittedRef = useRef(false);
   const [checkedKeys, setCheckedKeys] = useState<Set<string>>(() => new Set());
   const removalFocus = useActivityRemovalFocus();
@@ -1375,10 +1404,44 @@ export function ActivityView({
     : undefined;
   const launchNode = canvasLaunchNode ?? (launchDraft?.id === launchNodeId ? launchDraft : undefined);
 
+  const launchData = launchNode?.data as LeaderData | undefined;
+  const launchPending = launchData?.status === "creating" || !!launchData?.sessionKey;
+  const hasLaunchDraft = Boolean(launchNode);
+  useEffect(() => { onDraftPresenceChange?.(hasLaunchDraft); }, [hasLaunchDraft, onDraftPresenceChange]);
+  useEffect(() => { if (!active) setLaunchVisible(false); }, [active]);
+  const lastHomeRequest = useRef(homeRequest);
+  useEffect(() => {
+    if (lastHomeRequest.current === homeRequest) return;
+    lastHomeRequest.current = homeRequest;
+    setLaunchVisible(false);
+    setSelectedKey(null);
+    setActivityCollapsed(false);
+  }, [homeRequest]);
+
+  function resumeDraft() {
+    setSelectedKey(null);
+    setActionRequest(null);
+    setLaunchVisible(true);
+  }
+  function backToActivity() {
+    setLaunchVisible(false);
+    setSelectedKey(null);
+    setActivityCollapsed(false);
+  }
+
+  const launchWorkspaceControl = (
+    <WorkspacePicker workspaces={workspaces} nodes={nodes} value={selectedWorkspaceId}
+      currentId={activeCanvasWorkspace} onChange={setLaunchWorkspaceId} onCreate={onCreateWorkspace}
+      disabled={launchPending} active={active && launchVisible} />
+  );
+
   function openLaunchExperience() {
-    if (launchNodeId) return;
+    if (launchNodeId) { resumeDraft(); return; }
+    setLaunchVisible(true);
+    setLaunchInEmptyWorkspace(activitySessions.length === 0);
     setVisibility("open");
     setSummaryFilter(null);
+    setLaunchWorkspaceId(activeCanvasWorkspace);
     const draft = onLaunchLeader();
     if (typeof draft === "string") {
       setSelectedKey(null);
@@ -1392,7 +1455,9 @@ export function ActivityView({
   }
 
   function closeLaunchExperience() {
-    if (!launchNode) return;
+    if (!launchNode || launchPending) return;
+    setLaunchVisible(false);
+    autoLaunchTriedRef.current = true;
     if (canvasLaunchNode && !(launchNode.data as LeaderData).sessionKey) {
       onCancelLaunchLeader(launchNode.id);
     }
@@ -1408,7 +1473,7 @@ export function ActivityView({
 
     if (!launchCommittedRef.current && !canvasLaunchNode && data.sessionKey) {
       launchCommittedRef.current = true;
-      onCommitLaunchLeader(next);
+      onCommitLaunchLeader(next, selectedWorkspaceId);
       return;
     }
     if (canvasLaunchNode || launchCommittedRef.current) {
@@ -1470,6 +1535,7 @@ export function ActivityView({
   );
 
   const selectBySessionKey = (sessionKey: string) => {
+    setLaunchVisible(false);
     setActionRequest(null);
     const entry = activitySessions.find((session) => session.sessionKey === sessionKey)
       ?? sessions.find((session) => session.sessionKey === sessionKey);
@@ -1482,7 +1548,7 @@ export function ActivityView({
   // assigns a session key.
   const loadPending = loading || Boolean(loadError);
   const emptyStateActive = activitySessions.length === 0 && !loadPending;
-  const autoLaunchActive = emptyStateActive && visibility === "open" && !summaryFilter;
+  const autoLaunchActive = active && emptyStateActive && visibility === "open" && !summaryFilter;
   const recentWork = useMemo(
     () => selectRecentAgentWork(sessions, nodes.filter((node) => node.id !== launchNodeId)),
     [sessions, nodes, launchNodeId],
@@ -1496,6 +1562,9 @@ export function ActivityView({
     }
     if (launchNodeId || autoLaunchTriedRef.current) return;
     autoLaunchTriedRef.current = true;
+    setLaunchVisible(true);
+    setLaunchInEmptyWorkspace(true);
+    setLaunchWorkspaceId(activeCanvasWorkspace);
     const draft = onLaunchLeader();
     if (typeof draft === "string") {
       autoLaunchNodeRef.current = draft;
@@ -1506,14 +1575,17 @@ export function ActivityView({
       setLaunchDraft(draft);
       setLaunchNodeId(draft.id);
     }
-  }, [autoLaunchActive, launchNodeId, onLaunchLeader]);
+  }, [autoLaunchActive, launchNodeId, onLaunchLeader, activeCanvasWorkspace]);
 
   useEffect(() => {
-    if (autoLaunchActive) return;
+    if (autoLaunchActive || !active || !launchVisible || launchDraft) return;
     const autoNodeId = autoLaunchNodeRef.current;
     if (!autoNodeId || autoNodeId !== launchNodeId) return;
-    const node = nodes.find((candidate) => candidate.id === autoNodeId)
-      ?? (launchDraft?.id === autoNodeId ? launchDraft : undefined);
+    const node = nodes.find((candidate) => candidate.id === autoNodeId);
+    // create_work_item is broadcast before its receipt reaches the composer.
+    // A populated roster does not mean this pending launch was abandoned.
+    if (node && ((node.data as LeaderData).status === "creating"
+      || (node.data as LeaderData).workItemId)) return;
     if (node && !(node.data as LeaderData).sessionKey) {
       if (nodes.some((candidate) => candidate.id === autoNodeId)) {
         onCancelLaunchLeader(autoNodeId);
@@ -1522,7 +1594,7 @@ export function ActivityView({
       setLaunchNodeId(null);
     }
     autoLaunchNodeRef.current = null;
-  }, [autoLaunchActive, launchDraft, launchNodeId, nodes, onCancelLaunchLeader]);
+  }, [autoLaunchActive, active, launchVisible, launchDraft, launchNodeId, nodes, onCancelLaunchLeader]);
 
   // Unmount: drop an auto-created draft that never launched (latest state via ref).
   const unmountCleanupRef = useRef<() => void>(() => {});
@@ -1573,11 +1645,14 @@ export function ActivityView({
     if (!sessionKey || !activitySessions.some((session) => session.sessionKey === sessionKey)) return;
     const launched = activitySessions.find((session) => session.sessionKey === sessionKey);
     const entry = launched ? activityEntryId(launched) : `session:${sessionKey}`;
-    setSelectedKey(entry);
-    setStartedEntry(entry);
+    if (launchVisible && active) {
+      setSelectedKey(entry);
+      setStartedEntry(entry);
+    }
+    setLaunchVisible(false);
     setLaunchDraft(null);
     setLaunchNodeId(null);
-  }, [activitySessions, launchNode]);
+  }, [activitySessions, launchNode, launchVisible, active]);
 
   useEffect(() => {
     if ((startedEntry && startedEntry === selectedKey) || (initialSelectedKey && initialSelectedKey === selectedKey)) {
@@ -1609,7 +1684,7 @@ export function ActivityView({
   }, [activitySessions]);
 
   return (
-    <div className={`act-root${activityCollapsed && selectedSession ? " act-root--list-collapsed" : ""}`} {...removalFocus}>
+    <div className={`act-root${launchNode && launchVisible ? " act-root--composing" : ""}${activityCollapsed && selectedSession ? " act-root--list-collapsed" : ""}`} {...removalFocus}>
       <div className="act-main" id="activity-session-list">
         <div className="act-list-toolbar">
           <header className="act-header">
@@ -1639,13 +1714,29 @@ export function ActivityView({
               className="act-launch-btn"
               type="button"
               onClick={openLaunchExperience}
-              aria-label={launchNode ? "New leader form open" : "New"}
-              disabled={Boolean(launchNode)}
+              aria-label={launchNode ? launchVisible ? "New leader form open" : "Resume draft" : "New"}
+              disabled={Boolean(launchNode) && launchVisible}
             >
               <Plus size={14} aria-hidden="true" />
-              <span>New</span>
+              <span>{launchNode && !launchVisible ? "Resume draft" : "New"}</span>
             </button>
           </header>
+          {launchNode && !launchVisible && (
+            <section className="act-draft-notice" aria-label="Leader draft">
+              <div className="act-draft-notice-copy" role="status">
+                <span className="act-draft-notice-label">{launchPending ? "Starting leader" : "Unfinished draft"}</span>
+                <strong>{launchData?.taskName?.trim() || "New leader"}</strong>
+                <p>{launchPending ? "Your leader is starting. You can keep browsing Activity."
+                  : "Your prompt and settings are kept here. Pick up where you left off."}</p>
+              </div>
+              <div className="act-draft-notice-actions">
+                <button className="act-btn act-btn--primary" type="button" onClick={resumeDraft}>
+                  {launchPending ? "View launch" : "Resume draft"}
+                </button>
+                {!launchPending && <button className="act-btn" type="button" onClick={closeLaunchExperience}>Discard draft</button>}
+              </div>
+            </section>
+          )}
           <div className="act-category-toolbar">
             {selectedSession && (
               <button
@@ -1827,7 +1918,7 @@ export function ActivityView({
                       selected={activityEntryId(session) === selectedKey}
                       checked={checkedKeys.has(activityEntryId(session))}
                       onOpenAction={() => openSessionAction(session)}
-                      onSelect={() => { setActionRequest(null); setSelectedKey(activityEntryId(session)); }}
+                      onSelect={() => { setLaunchVisible(false); setActionRequest(null); setSelectedKey(activityEntryId(session)); }}
                       onToggleSelect={() => toggleChecked(activityEntryId(session))}
                       onAction={sendLifecycle}
                     />
@@ -1850,7 +1941,7 @@ export function ActivityView({
                       selected={activityEntryId(session) === selectedKey}
                       checked={checkedKeys.has(activityEntryId(session))}
                       hasChanges={session.reviewableChanges === true}
-                      onSelect={() => { setActionRequest(null); setSelectedKey(activityEntryId(session)); }}
+                      onSelect={() => { setLaunchVisible(false); setActionRequest(null); setSelectedKey(activityEntryId(session)); }}
                       onToggleSelect={() => toggleChecked(activityEntryId(session))}
                       onAction={sendLifecycle}
                     />
@@ -1884,11 +1975,13 @@ export function ActivityView({
         </main>
       )}
 
-      {activitySessions.length === 0 && (autoLaunchActive || launchNode) && (
+      {(launchNode ? launchInEmptyWorkspace : activitySessions.length === 0 && autoLaunchActive) && (
         <main
           className={`act-empty-workspace${visibleSessions.length === 0 ? " act-launch-panel" : ""}`}
           aria-label="Activity workspace"
+          hidden={Boolean(launchNode) && !launchVisible}
         >
+          {launchNode && <button className="act-draft-back act-btn" type="button" onClick={backToActivity}><ArrowLeft size={15} aria-hidden /> Back to activity</button>}
           {visibleSessions.length === 0 ? <ActivityOnboarding /> : null}
           <div className={visibleSessions.length === 0
             ? "act-launch-inputs"
@@ -1905,6 +1998,7 @@ export function ActivityView({
                 setSummaryFilter(null);
                 selectBySessionKey(sessionKey);
               }}
+              launchWorkspaceControl={launchWorkspaceControl}
               launchNode={launchNode}
               onLaunch={openLaunchExperience}
               onUpdateNodeData={updateLaunchNodeData}
@@ -1917,7 +2011,7 @@ export function ActivityView({
         </main>
       )}
 
-      {!selectedSession && !launchNode && activitySessions.length > 0 && (
+      {!selectedSession && (!launchNode || !launchVisible) && activitySessions.length > 0 && (
         <ActivitySessionHome
           sessions={activitySessions}
           onOpenSession={(sessionKey) => {
@@ -1963,9 +2057,10 @@ export function ActivityView({
         />
       )}
 
-      {launchNode && !emptyStateActive && (
-        <section className="act-launch-panel" aria-label="New leader">
+      {launchNode && !launchInEmptyWorkspace && (
+        <section className="act-launch-panel" aria-label="New leader" hidden={!launchVisible}>
           <header className="act-launch-head">
+            <button className="act-draft-back act-btn" type="button" onClick={backToActivity}><ArrowLeft size={15} aria-hidden /> Back to activity</button>
             <div>
               <span className="act-launch-eyebrow">New leader</span>
               <h2>What should it do?</h2>
@@ -1975,6 +2070,7 @@ export function ActivityView({
               className="act-launch-close"
               type="button"
               onClick={closeLaunchExperience}
+              disabled={launchPending}
               aria-label={(launchNode.data as LeaderData).sessionKey ? "Close launch" : "Cancel new leader"}
             >
               <span aria-hidden>×</span>
@@ -1984,6 +2080,7 @@ export function ActivityView({
             <LeaderNodeRenderer
               node={launchNode}
               launchMode
+              launchWorkspaceControl={launchWorkspaceControl}
               isSelected
               onUpdateData={(data) => updateLaunchNodeData(launchNode.id, data as LeaderData)}
               socketSend={socketSend}

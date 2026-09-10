@@ -163,21 +163,22 @@ describe("SettingsMenu", () => {
     });
   });
 
-  it("saves execution sandbox defaults", () => {
+  it.each([
+    ["read-only", { filesystemScope: "read-only", approvalPolicy: "on-failure" }],
+    ["unrestricted", { filesystemScope: "unrestricted", approvalPolicy: "on-failure", fullHostScope: "leader-only" }],
+    ["unrestricted-with-minions", { filesystemScope: "unrestricted", approvalPolicy: "on-failure", fullHostScope: "leader-and-minions" }],
+  ])("saves execution sandbox default %s", (access, expected) => {
     const onChange = vi.fn();
     render(<SettingsMenu settings={{}} onSettingsChange={onChange} />);
 
     fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
     openCategory("Agent defaults");
     fireEvent.change(screen.getByLabelText("Sandbox file access"), {
-      target: { value: "read-only" },
+      target: { value: access },
     });
 
     expect(onChange).toHaveBeenCalledWith({
-      defaultSandboxPolicy: {
-        filesystemScope: "read-only",
-        approvalPolicy: "on-failure",
-      },
+      defaultSandboxPolicy: expected,
     });
   });
 

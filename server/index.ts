@@ -20,7 +20,7 @@ import crypto from "crypto";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { createProjectRoutes } from "./routes/projects.ts";
-import { createFileRoutes } from "./routes/files.ts";
+import { createFileRoutes } from "./routes/files.ts"; import { createHistoryRoutes } from "./routes/history.ts"; import { setHistoryCookie, historyCookieToken } from "./history-auth.ts";
 import { createBus } from "./bus.ts";
 import { attachConnectionListeners } from "./ws-connection.ts";
 import { cleanupStaleWorktrees } from "./worktree.ts";
@@ -41,6 +41,7 @@ import { createPushRoutes } from "./routes/push.ts";
 import { createPushNotifier } from "./push-notifier.ts";
 import { sendWebPush } from "./push-sender.ts";
 import { serverLogger } from "./logging.ts";
+import { startRuntimeMetrics } from "./runtime-metrics.ts";
 import { createReadinessRoutes } from "./routes/readiness.ts";
 import { getHarnessReadiness } from "./harness/readiness.ts";
 import "./harness/register-production.ts";
@@ -111,12 +112,12 @@ app.get("/api/auth/token", (req: Request, res: Response) => {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-  res.json({ token: AUTH_TOKEN });
+  setHistoryCookie(req, res, AUTH_TOKEN); res.json({ token: AUTH_TOKEN });
 });
 
 function authMiddleware(req: Request, res: Response, next: Function) {
   const authHeader = req.headers["authorization"];
-  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : historyCookieToken(req);
   if (token !== AUTH_TOKEN) {
     res.status(401).json({ error: "Unauthorized" });
     return;
@@ -126,7 +127,7 @@ function authMiddleware(req: Request, res: Response, next: Function) {
 
 // Mount REST API routes (with auth)
 app.use("/api/projects", authMiddleware, createProjectRoutes());
-app.use("/api/files", authMiddleware, createFileRoutes());
+app.use("/api/files", authMiddleware, createFileRoutes()); app.use("/api/history", authMiddleware, createHistoryRoutes());
 app.use("/api/readiness", authMiddleware, createReadinessRoutes());
 app.post("/api/server/restart", authMiddleware, (_req: Request, res: Response) => {
   res.json({ ok: true, restarting: true });
@@ -177,6 +178,9 @@ const MAX_SESSIONS = 50;
 // architecture fitness test.
 
 const registry = new SessionRegistry(MAX_SESSIONS);
+const stopRuntimeMetrics = startRuntimeMetrics(() => ({
+  sessions: registry.size, activeSessions: registry.activeCount(),
+}));
 const bus = createBus(wss);
 
 // Fan approval/minion/error bus events out as Web Push notifications.
@@ -242,7 +246,7 @@ for (const scope of pushDb.prepare(`SELECT DISTINCT repository_path,target_ref
   Array<{ repository_path: string; target_ref: string }>) {
   drainIntegrationScope(scope.repository_path, scope.target_ref);
 }
-const { workItems, runtimeLifecycle, continueRun, registerChildAllocationCallback } = bootstrapWorkItemRuntime({
+const { workItems, wakeDelivery, runtimeLifecycle, continueRun, registerChildAllocationCallback } = bootstrapWorkItemRuntime({
   db: pushDb,
   bus,
   registry,
@@ -255,7 +259,7 @@ worktreeIntegrations.setWorkItemNotifier((workItemId, cause) => {
 });
 void worktreeIntegrations.recoverTerminalContributions()
   .catch((error) => log.warn("terminal_contribution_recovery_failed", { error }));
-sessionDeps.workItemLifecycle = runtimeLifecycle;
+sessionDeps.workItemLifecycle = runtimeLifecycle; sessionDeps.wakeDelivery = wakeDelivery;
 sessionDeps.transitionWorktreeProvisioning = (runKey, outcome, error) =>
   worktreeIntegrations.transitionProvisioning(runKey, outcome, error);
 const liveEditWorkItems = installLiveEditWorkItemBridges({ db: pushDb, bus, service: workItems });
@@ -371,6 +375,7 @@ server.listen(PORT, HOST, () => {
 
 async function shutdownCleanup(): Promise<void> {
   log.info("shutdown_requested", { worktrees: "preserved" });
+  stopRuntimeMetrics();
   stopWorktreeCleanup();
   gitIntegrationPump.shutdown();
   liveEditWorkItems.shutdown();

@@ -50,6 +50,18 @@ describe("workspace identity contracts", () => {
 });
 
 describe("sandbox policy contracts", () => {
+  it.each(["leader-only", "leader-and-minions"])("round-trips full host scope %s", (fullHostScope) => {
+    const policy = { filesystemScope: "unrestricted", approvalPolicy: "never", fullHostScope };
+    expect(sandboxPolicySchema.parse(JSON.parse(JSON.stringify(policy)))).toEqual(policy);
+    expect(sandboxResolutionSchema.parse({ requested: policy,
+      effective: { filesystemScope: "unrestricted", approvalPolicy: "never" }, unsupported: [] }).requested)
+      .toEqual(policy);
+  });
+
+  it("rejects unknown full host scopes", () => {
+    expect(sandboxPolicySchema.safeParse({ filesystemScope: "unrestricted", approvalPolicy: "never",
+      fullHostScope: "everyone" }).success).toBe(false);
+  });
   it("represents filesystem and approval posture independently", () => {
     expect(sandboxPolicySchema.parse({
       filesystemScope: "workspace-write",

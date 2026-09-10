@@ -18,6 +18,20 @@ const task = (status: TaskPlanItem['status']): TaskPlanItem => ({ taskId: status
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Fullscreen leader capabilities', () => {
+  it('mounts the live change viewer only when the Changes tab is selected', () => {
+    render(<LeaderFullscreen {...props({ sessionKey: 'live-session', worktreeIsolation: false })}
+      changesSlot={<p>Current workspace edits</p>} />);
+    expect(screen.queryByText('Current workspace edits')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle context panel' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace changes' }));
+    expect(screen.getByText('Current workspace edits')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close context panel' }));
+    expect(screen.queryByText('Current workspace edits')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle context panel' }));
+    expect(screen.getByText('Current workspace edits')).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(screen.queryByText('Current workspace edits')).toBeNull();
+  });
   it('shows execution when work arrives and preserves the reader’s explicit panel choice', () => {
     const { rerender } = render(<LeaderFullscreen {...props()} />);
     const execution = screen.getByRole('button', { name: 'Toggle execution panel' });

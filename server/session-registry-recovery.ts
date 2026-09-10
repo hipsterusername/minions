@@ -1,3 +1,4 @@
+import { isHostWakeEligible } from "./wake-coalescer.ts";
 /** Restart reconciliation for persisted Leader/minion workflow state. */
 
 import type { SessionHost } from "./session-host.ts";
@@ -18,6 +19,7 @@ export function recoverDurableWorkflowState(opts: {
     reconcileChildren(leaderKey, host, opts);
     persistTaskState(leaderKey, host.taskState);
 
+    if (!isHostWakeEligible(host, opts.deps)) { host.clearWaitTimer(); continue; }
     const wait = host.taskState.pendingWait;
     if (!wait) {
       opts.wakeLeader(leaderKey);
@@ -92,7 +94,7 @@ function restoreWaitTimer(
   deps: SessionHostDeps,
 ): void {
   host.clearWaitTimer();
-  const resume = () => requestWaitResume(host, deps, {
+  const resume = () => host.taskState?.pendingWait === wait && isHostWakeEligible(host, deps) && requestWaitResume(host, deps, {
     completedReason: wait.reason,
     immediate: true,
     idempotencyKey: `wait:${host.id}:${wait.scheduledAt}`,

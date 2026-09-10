@@ -1,3 +1,5 @@
+import { HistoryBuffer } from "./history-cache.ts";
+import { historyFactsForHost, recordHistoryEvent } from "./session-history-host.ts";
 import { assertSessionIdentity } from "./leader-identity.ts";
 import { HARNESS_DRAIN, type DrainableHarnessControl } from "./harness/terminal-provenance.ts";
 import { hasWorktreeOperation, trackWorktreeExecution } from "./commands/worktree-operation-lock.ts";
@@ -129,7 +131,10 @@ export class SessionHost {
   abortController: AbortController = new AbortController();
   eventStream: AsyncIterable<NormalizedEvent> | null = null;
   runControl: HarnessRunControl | null = null;
-  eventBuffer: BufferedEvent[] = [];
+  private historyBuffer = new HistoryBuffer();
+  get eventBuffer(): BufferedEvent[] { return this.historyBuffer.events; }
+  set eventBuffer(events: BufferedEvent[]) { this.historyBuffer.replace(events); }
+  get historyFacts() { return historyFactsForHost(this); }
   lastError: string | null = null;
   lastErrorFull: string | null = null;
   model: string | null = null;
@@ -150,7 +155,7 @@ export class SessionHost {
   private terminateDeps: SessionTerminateDeps | null = null;
   private removed = false;
   /** Fence late stream/finalizer callbacks before deleting durable state. */
-  markRemoved(): void { this.removed = true; }
+  markRemoved(): void { this.removed = true; this.historyBuffer.clear(); }
   constructor(id: string, cwd: string) {
     this.id = id;
     this.runKey = id;
@@ -167,16 +172,14 @@ export class SessionHost {
   /**
    * Push an event onto the buffer, trimming to the retention cap, and
    * write it through to the on-disk event_log so it survives a restart.
-   * Persistence failures are swallowed inside `persistEventToDb` so the
-   * SDK loop keeps running even if the DB is unavailable.
+   * Persist before projecting or evicting; a failed write must not silently
+   * discard the only exact copy of an event.
    */
   bufferEvent(event: BufferedEvent): void {
     if (this.removed) return;
-    this.eventBuffer.push(event);
-    if (this.eventBuffer.length > MAX_BUFFERED_EVENTS) {
-      this.eventBuffer = this.eventBuffer.slice(-MAX_BUFFERED_EVENTS);
-    }
-    persistEventToDb(this.id, event);
+    const id = persistEventToDb(this.id, event);
+    const retained = recordHistoryEvent(this, event, id);
+    this.historyBuffer.append(retained);
   }
 
   /** Write-through persistence to SQLite (idempotent). */
@@ -202,7 +205,8 @@ export class SessionHost {
   }
 
   /** Start or resume a provider invocation, retaining execution ownership until drain. */
-  async start(opts: StartSessionOptions, deps: SessionHostDeps): Promise<void> {
+  async start(opts: StartSessionOptions, deps: SessionHostDeps,
+    onDispatched?: () => void, onAccepted?: () => void): Promise<void> {
     assertSessionIdentity(opts, this);
     if (hasWorktreeOperation(this, opts.parentWorktree?.path ?? opts.plannedContribution?.path ?? this.worktree?.path)) throw new Error("Worktree operation is in progress");
     if (this.removed) throw new Error("Cannot start a removed session");
@@ -326,19 +330,20 @@ export class SessionHost {
       const { events, control } = harness.start(startOpts);
       this.eventStream = events;
       this.runControl = control;
+      onDispatched?.();
       executionDrain = (control as DrainableHarnessControl)[HARNESS_DRAIN];
       let continuationOpts: StartSessionOptions | null;
       let checkpointInitialized: boolean;
       try {
         ({ continuationOpts, checkpointInitialized } = await consumeProviderInvocation({
-          host: this, opts, deps, agentType, agentCtx, events, abortController,
+          host: this, opts, deps, agentType, agentCtx, events, abortController, onAccepted,
         }));
       } finally {
         this.eventStream = null;
         this.runControl = null;
       }
       failUninitializedCheckpoint(this, opts, checkpointInitialized, "Fresh provider thread ended before initialization.");
-      if (continuationOpts) await this.start(continuationOpts, deps);
+      if (continuationOpts) await this.start(continuationOpts, deps, onDispatched, onAccepted);
       else if (!drainQueuedWorkItemGuidance(this, deps)) drainQueuedWaitResume(this, deps);
     } catch (err: unknown) {
       if (abortController.signal.aborted || this.abortController !== abortController) return;

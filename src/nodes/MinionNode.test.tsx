@@ -101,6 +101,20 @@ function makeInitialData(overrides: Partial<MinionData> = {}): MinionData {
 // ── End-to-end fixture replay ──────────────────────────
 
 describe("MinionNode: execution log scroll capture", () => {
+  it("discloses the full report with one control instead of a second show-more step", () => {
+    const { socket } = createReplaySocket();
+    const summary = "Evidence checked. ".repeat(80) + "Reconciliation remains pending.";
+    const { getByRole, getByText, queryByRole } = render(<Probe socket={socket}
+      initial={makeInitialData({ messages: [{ id: "verdict", role: "assistant",
+        content: JSON.stringify({ result: "inconclusive", confidence: 0.98, summary }), timestamp: 1 }] })} />);
+    fireEvent.click(getByRole("button", { name: /log \(1\)/i }));
+    expect(getByText("Verification: Inconclusive")).not.toBeVisible();
+    expect(getByText(summary)).not.toBeVisible();
+    expect(queryByRole("button", { name: /show more/i })).toBeNull();
+    fireEvent.click(getByText("View report details"));
+    expect(getByText(summary)).toBeVisible();
+  });
+
   it("captures wheel events in the expanded log", () => {
     const { socket } = createReplaySocket();
     const { container, getByRole } = render(

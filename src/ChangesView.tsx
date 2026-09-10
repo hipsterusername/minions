@@ -1,8 +1,8 @@
 /**
  * Worktree review — folded into the Activity view.
  *
- * `SessionChangesPanel` renders the diff + merge/discard controls for a single
- * leader session's isolated worktree. It's shown inside the Activity
+ * `SessionChangesPanel` renders live workspace changes or the diff and
+ * merge/discard controls for a leader's isolated worktree. It's shown inside the Activity
  * inspector when the selected session has reviewable changes, so review lives
  * next to where you inspect a session rather than in a separate tab.
  *
@@ -17,13 +17,12 @@ import {
   Trash2,
   ExternalLink,
   RefreshCw,
-  Loader2,
   AlertTriangle,
 } from "lucide-react";
 import type { CanvasNode } from "./types.ts";
 import type { LeaderData } from "./nodes/leader/types.ts";
 import { ConfirmModal } from "./components/ConfirmModal.tsx";
-import type { SocketSubscribe } from "./use-socket.ts";
+import type { SocketSubscribeLike } from "./use-socket.ts";
 import { useReviewDiff } from "./use-review-diff.ts";
 import "./review-feedback.css";
 import { randomUuid } from "./random-id.ts";
@@ -31,6 +30,8 @@ import { useWorktreeIntegration } from "./use-worktree-integration.ts";
 import { WorktreeIntegrationControls } from "./WorktreeIntegrationControls.tsx";
 import { selectCanvasChangeMode } from "./nodes/leader/work-item.ts";
 import "./changes-view.css";
+import { LiveChangesPanel } from "./LiveChangesPanel.tsx";
+import { ChangesRefreshIndicator } from "./ChangesRefreshIndicator.tsx";
 
 /**
  * Pure predicate: does this leader have worktree changes worth surfacing for
@@ -76,11 +77,12 @@ export function SessionChangesPanel({
   sessionKey: string;
   data: LeaderData;
   socketSend?: ((data: unknown) => void) | undefined;
-  socketSubscribe?: SocketSubscribe | undefined;
+  socketSubscribe?: SocketSubscribeLike;
   onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
   onOpenInCanvas: (nodeId: string) => void;
 }) {
-  if (selectCanvasChangeMode(data) !== "worktree") return null;
+  if (selectCanvasChangeMode(data) === "live") return <LiveChangesPanel
+    sessionKey={sessionKey} send={socketSend} subscribe={socketSubscribe} />;
 
   return (
     <WorktreeSessionChangesPanel
@@ -108,7 +110,7 @@ function WorktreeSessionChangesPanel({
   sessionKey: string;
   data: LeaderData;
   socketSend?: ((data: unknown) => void) | undefined;
-  socketSubscribe?: SocketSubscribe | undefined;
+  socketSubscribe?: SocketSubscribeLike;
   onUpdateNodeData: (nodeId: string, data: LeaderData) => void;
   onOpenInCanvas: (nodeId: string) => void;
 }) {
@@ -144,7 +146,7 @@ function WorktreeSessionChangesPanel({
 
   return (
     <div className="changes-card changes-card--inline" data-testid="session-changes-panel">
-      <div className="changes-card__top">
+      <div className="changes-card__top changes-card__top--refresh">
         {!data.workItemId && approvalPending && (
           <span className="changes-badge changes-badge--pending">Ready for review</span>
         )}
@@ -156,18 +158,12 @@ function WorktreeSessionChangesPanel({
         {!data.workItemId && data.worktreeStatus === "merging" && (
           <span className="changes-badge changes-badge--merging">Merging…</span>
         )}
+        <ChangesRefreshIndicator loading={loading} />
       </div>
 
       {data.worktreeBranch && (
         <div className="changes-card__branch">
           <GitBranch size={11} strokeWidth={2} aria-hidden /> {data.worktreeBranch}
-        </div>
-      )}
-
-      {loading && (
-        <div className="changes-card__loading" role="status">
-          <Loader2 size={13} strokeWidth={2} className="changes-spin" aria-hidden />
-          {diff ? "Refreshing…" : "Loading diff…"}
         </div>
       )}
 

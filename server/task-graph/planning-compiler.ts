@@ -46,6 +46,7 @@ export function compileSemanticGraphPlan(input: CompileSemanticGraphPlanInput): 
     id: nodeIdsByStepKey[step.key]!,
     title: step.title,
     objective: step.objective,
+    ...(step.context ? { context: step.context } : {}),
     inputBindings: step.inputBindings,
     outputSchemas: step.outputSchemas,
     constraints: [

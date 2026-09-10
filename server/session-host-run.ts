@@ -123,7 +123,7 @@ export function buildHarnessStartOpts(
     };
   }
 
-  persistInvocationBeforeHarnessOpen(host);
+  persistInvocationBeforeHarnessOpen(host, Date.now(), opts.continuitySource === "system");
   return { startOpts, allowedTools };
 }
 

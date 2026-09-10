@@ -37,6 +37,8 @@ export type ApprovalPolicy = z.infer<typeof approvalPolicySchema>;
 const sandboxPolicyAxesSchema = z.object({
   filesystemScope: filesystemScopeSchema,
   approvalPolicy: approvalPolicySchema,
+  /** Omitted legacy policies grant full host access to the Leader only. */
+  fullHostScope: z.enum(["leader-only", "leader-and-minions"]).optional(),
 }).strict();
 
 /**

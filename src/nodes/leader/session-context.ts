@@ -1,4 +1,5 @@
 import { renderRecoveryFacts } from "../../../shared/recovery-context.ts";
+import { isArchiveDisplayMessage } from "../../archive-display.ts";
 /**
  * Session-context helpers for the Leader node.
  *
@@ -52,7 +53,7 @@ export function buildSessionContext(
     .filter(
       (m) =>
         (m.role === "user" || m.role === "assistant" || m.role === "result") &&
-        m.content.trim().length > 0,
+        m.content.trim().length > 0 && !isArchiveDisplayMessage(m),
     )
     .map((m) => {
       const role = m.role === "result" ? "assistant (result)" : m.role;

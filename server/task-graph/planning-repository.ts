@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { summarizeMinionContext } from "../../shared/minion-context.ts";
 import {
   semanticTaskGraphPlanSchema,
   taskGraphPlanHistoryEntrySchema,
@@ -247,6 +248,7 @@ export class TaskGraphPlanningRepository {
         acceptanceCriteria: step.acceptanceCriteria,
         dependsOn: step.dependsOn.map((dependency) => dependency.stepKey),
         contextSelectors: step.contextSelectors,
+        ...(step.context ? { contextSummary: summarizeMinionContext(step.context) } : {}),
         inputBindings: step.inputBindings,
         outputSchemas: step.outputSchemas,
         outputExamples: Object.fromEntries(Object.entries(step.outputSchemas)

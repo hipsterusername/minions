@@ -1,7 +1,9 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
+export interface ChatFollowMemory { following?: boolean; position?: number }
+
 /** Follow live output until the reader scrolls away or selects transcript text. */
-export function useChatFollow(sessionKey: string, activity: unknown, active = true) {
+export function useChatFollow(sessionKey: string, activity: unknown, active = true, memory?: ChatFollowMemory) {
   const feedRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -22,18 +24,23 @@ export function useChatFollow(sessionKey: string, activity: unknown, active = tr
       setIsFollowing(false);
     }
     feed.scrollTop = following.current ? feed.scrollHeight : position.current;
-    position.current = feed.scrollTop;
+    // Retained history can arrive after mount. Keep a saved reading position
+    // until enough content is loaded to reach it instead of clamping it to zero.
+    if (!memory || following.current || feed.scrollTop >= position.current) position.current = feed.scrollTop;
     geometry.current = { height: feed.clientHeight, content: feed.scrollHeight, width: feed.clientWidth };
-  }, [active]);
+  }, [active, memory]);
 
   useLayoutEffect(() => {
-    following.current = true;
-    position.current = 0;
+    following.current = memory?.following ?? true;
+    position.current = memory?.position ?? 0;
     previous.current = activity;
-    setIsFollowing(true);
+    setIsFollowing(following.current);
     setHasNewActivity(false);
     // Activity intentionally isn't a reset dependency: streaming must not repin.
-  }, [sessionKey]);
+    return () => {
+      if (memory) { memory.following = following.current; memory.position = position.current; }
+    };
+  }, [sessionKey, memory]);
 
   useLayoutEffect(() => {
     if (!active) return;

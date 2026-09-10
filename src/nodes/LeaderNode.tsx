@@ -1,6 +1,7 @@
 import { ChatLinkScope } from "../components/ChatLink.tsx";
+import { LiveChangesPanel } from "../LiveChangesPanel.tsx";
 import { FormSubmissionProvider } from "./render/FormSubmissionProvider.tsx";
-import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { Maximize2, Square, Zap } from "lucide-react";
 import type { NodeRenderProps, ThinkingConfig } from "../types.ts";
 import { DEFAULT_THINKING_CONFIG } from "../types.ts";
@@ -114,7 +115,8 @@ export function LeaderNodeRenderer({
   onOpenSystemModel,
   onSaveLeaderPreset,
   launchMode = false,
-}: NodeRenderProps & { launchMode?: boolean }) {
+  launchWorkspaceControl,
+}: NodeRenderProps & { launchMode?: boolean; launchWorkspaceControl?: ReactNode }) {
   const data = node.data as LeaderData;
   const slashCommands = useMemo(
     () => buildSlashCommands(projectSettings),
@@ -1032,8 +1034,8 @@ export function LeaderNodeRenderer({
   if (launchMode) {
     return (
       <FormSubmissionProvider key={data.sessionKey} sessionKey={data.sessionKey ?? ""} socketSend={socketSend} socketSubscribe={socketSubscribe}><CanvasDeliveryContext.Provider value={delivery}><PromptAttachmentsContext.Provider value={promptAttachments}><LeaderSlashCommandsProvider commands={slashCommands} onSelect={handleContextActionSelect}><LeaderPromptSkillsContext.Provider value={handleSkillSelect}>
-        <ActivityLaunchForm nodeId={node.id} data={data} input={input} slashCommands={slashCommands}
-          promptPlaceholder={promptPlaceholder} submitDisabled={promptSubmitDisabled} submitActive={promptSubmitActive} pending={launchFeedback.pending} unavailableReason={!socketSend ? "Connection unavailable" : undefined} textareaRef={promptTextareaRef} {...(projectPath ? { projectPath } : {})}
+        <ActivityLaunchForm workspaceControl={launchWorkspaceControl} nodeId={node.id} data={data} input={input} slashCommands={slashCommands}
+          promptPlaceholder={promptPlaceholder} submitDisabled={promptSubmitDisabled} submitActive={promptSubmitActive} pending={launchFeedback.pending} unavailableReason={!socketSend ? "Connection unavailable" : undefined} textareaRef={promptTextareaRef}
           onInputChange={setInput} onKeyDown={handleKeyDown} onSubmit={handlePromptSubmit} onUpdate={(patch) => onUpdateData({ ...dataRef.current, ...patch })} />
         {launchFeedback.notice || launchNotice ? <div className="leader-launch-notice" role="status">{launchFeedback.notice ?? launchNotice}</div> : null}
       </LeaderPromptSkillsContext.Provider></LeaderSlashCommandsProvider></PromptAttachmentsContext.Provider></CanvasDeliveryContext.Provider></FormSubmissionProvider>
@@ -1311,6 +1313,11 @@ export function LeaderNodeRenderer({
           onOpenGraph={taskGraphController.openInspector}
           skillFlyoutAnchorRef={fullscreenSkillAnchorRef}
           actionsSlot={headerMenu} configSlot={configFooter} minionsSlot={minionsSurface}
+          changesSlot={selectCanvasChangeMode(data) === "live"
+            ? data.sessionKey ? <LiveChangesPanel sessionKey={data.sessionKey}
+              send={socketSend} subscribe={socketSubscribe} />
+              : <p>Start a session to inspect changes.</p>
+            : undefined}
           contextItems={getContextForNode?.()}
           dashboardSlot={<DashboardSurface renderState={data.renderState ?? emptyRenderState()} payloadError={renderPayloadError}
             onSubmitForm={handleSubmitForm} onAddContentNode={onAddContentNode} />}

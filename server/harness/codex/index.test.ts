@@ -18,6 +18,15 @@ import type {
   NormalizedEvent,
 } from "../types.ts";
 import { terminalProvenance } from "../terminal-provenance.ts";
+import { SessionHost } from "../../session-host.ts";
+import { createBus } from "../../bus.ts";
+import { openPersistDb, closePersistDb } from "../../session-persist.ts";
+import { createWorkItem, startWorkItemIteration, getWorkItemRun } from "../../work-item-repo.ts";
+import { createSqliteWorkItemService } from "../../work-item-service-sqlite.ts";
+import { createWorkItemRuntimeLifecycle } from "../../work-item-runtime-lifecycle.ts";
+import { TaskGraphService } from "../../task-graph/service.ts";
+import type { TaskGraphPlanningCoordinator } from "../../task-graph/planning-coordinator.ts";
+import "../../agents/index.ts";
 
 const sdkMock = vi.hoisted(() => {
   type ThreadStub = {
@@ -301,9 +310,181 @@ describe("CodexHarness.start()", () => {
       })(),
     );
     const out = await collect(codexHarness.start(baseOpts()).events);
+    expect(out.filter((e) => e.kind === "done")).toHaveLength(1);
     const last = out[out.length - 1] as { fullError?: string };
     expect(last.fullError).toContain("Codex Exec exited with code 1");
     expect(last.fullError).toContain("Reconnecting... 1/5");
+  });
+
+  it("keeps the invocation open across reconnects and waits for writer release before completion", async () => {
+    let writerActive = true;
+    sdkMock.setNextEvents((async function* () {
+      try {
+        yield { type: "thread.started", thread_id: "th-reconnect" };
+        yield { type: "error", message: "Reconnecting... 2/5 (stream disconnected before completion: websocket closed by server before response.completed)" };
+        yield { type: "item.started", item: { id: "cmd1", type: "command_execution", command: "echo recovered", status: "in_progress" } };
+        yield { type: "item.completed", item: { id: "m1", type: "agent_message", text: "Recovered successfully" } };
+        yield { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1, cached_input_tokens: 0 } };
+      } finally {
+        writerActive = false;
+      }
+    })());
+    const out: NormalizedEvent[] = [];
+    for await (const event of codexHarness.start(baseOpts({ resumeId: "th-reconnect" })).events) {
+      if (event.kind === "done") expect(writerActive).toBe(false);
+      out.push(event);
+    }
+    expect(out.map((e) => e.kind)).toEqual(["init", "api_retry", "tool_call", "text", "usage", "done"]);
+    expect(out.at(-1)).toMatchObject({ kind: "done", reason: "completed", result: "Recovered successfully" });
+  });
+
+  it.each(["turn.failed", "error"])("defers %s until the writer exits and emits exactly one terminal", async (type) => {
+    let writerActive = true;
+    sdkMock.setNextEvents((async function* () {
+      try {
+        yield { type: "thread.started", thread_id: "th-failed" };
+        yield type === "turn.failed"
+          ? { type, error: { message: "Model context window exceeded" } }
+          : { type, message: "Model context window exceeded" };
+        // The SDK may emit both the failure event and a nonzero process exit.
+        throw new Error("Codex Exec exited with code 1: shutdown detail");
+      } finally {
+        writerActive = false;
+      }
+    })());
+    const out: NormalizedEvent[] = [];
+    for await (const event of codexHarness.start(baseOpts()).events) {
+      if (event.kind === "done") expect(writerActive).toBe(false);
+      out.push(event);
+    }
+    expect(out.map((e) => e.kind)).toEqual(["init", "done"]);
+    expect(out.at(-1)).toMatchObject({ kind: "done", reason: "error", error: "Model context window exceeded" });
+    const last = out.at(-1) as Extract<NormalizedEvent, { kind: "done" }>;
+    expect(last.fullError).toContain("shutdown detail");
+  });
+
+  it("retains a fatal stream error on clean EOF and suppresses later activity", async () => {
+    sdkMock.setNextEvents(eventStream([
+      { type: "error", message: "Fatal stream error" },
+      { type: "item.completed", item: { id: "late", type: "agent_message", text: "stale activity" } },
+    ]));
+    expect(await collect(codexHarness.start(baseOpts()).events)).toEqual([
+      expect.objectContaining({ kind: "done", reason: "error", error: "Fatal stream error" }),
+    ]);
+  });
+
+  it("reports an unsuccessful reconnect on EOF without marking the run successful", async () => {
+    sdkMock.setNextEvents(eventStream([{ type: "error", message: "Reconnecting... 5/5" }]));
+    const out = await collect(codexHarness.start(baseOpts()).events);
+    expect(out.map((e) => e.kind)).toEqual(["api_retry", "done"]);
+    expect(out.at(-1)).toMatchObject({ kind: "done", reason: "error", error: "Reconnecting... 5/5" });
+  });
+
+  it("keeps an intentional abort during reconnect distinct from failure", async () => {
+    sdkMock.setNextEvents((async function* () {
+      yield { type: "error", message: "Reconnecting... 2/5" };
+      throw new Error("AbortError from SDK cleanup");
+    })());
+    const { events, control } = codexHarness.start(baseOpts());
+    const out: NormalizedEvent[] = [];
+    for await (const event of events) {
+      out.push(event);
+      if (event.kind === "api_retry") control.abort();
+    }
+    expect(out.map((e) => e.kind)).toEqual(["api_retry", "done"]);
+    expect(out.at(-1)).toMatchObject({ kind: "done", reason: "abort" });
+  });
+
+  it.each(["abort", "windows-cleanup"])("preserves a witnessed turn failure through %s", async (cleanup) => {
+    const ac = new AbortController();
+    sdkMock.setNextEvents((async function* () {
+      yield { type: "turn.failed", error: { message: "Provider failed" } };
+      if (cleanup === "abort") ac.abort();
+      throw new Error(cleanup === "abort" ? "AbortError from SDK cleanup"
+        : "Failed to parse item: SUCCESS: The process with PID 2596 (child process of PID 14044) has been terminated.");
+    })());
+    const out = await collect(codexHarness.start(baseOpts({ abortSignal: ac.signal })).events);
+    expect(out).toEqual([expect.objectContaining({ kind: "done", reason: "error", error: "Provider failed" })]);
+  });
+
+  it("keeps the durable leader and graph usable after reconnect and refuses a competing iteration", async () => {
+    const db = openPersistDb(":memory:");
+    const bus = createBus({ clients: new Set() } as never);
+    const host = new SessionHost("primary", "/tmp");
+    const service = createSqliteWorkItemService({ db, bus, launchRun: vi.fn(), continueRun: vi.fn(),
+      generateKey: (kind, id) => `${kind}-${id}` });
+    const lifecycle = createWorkItemRuntimeLifecycle({ db, bus, service });
+    const terminal = vi.spyOn(lifecycle, "runTerminal");
+    const children = { startChildRun: vi.fn(async (input) => ({
+      runKey: "child", workItemId: "work", runKind: "child" as const,
+      parentRunKey: "primary", taskId: input.taskId, attemptId: input.attemptId,
+      attemptNumber: input.attemptNumber, runNumber: null, previousRunKey: null,
+      providerSessionId: null, outcome: "none" as const, startedAt: Date.now(), endedAt: null, finalReport: null,
+    })) };
+    const graph = new TaskGraphService({ db, bus, children });
+    let checkedWhileReconnecting = false;
+    let writerActive = true;
+    const terminalWriterStates: boolean[] = [];
+    try {
+      createWorkItem(db, { id: "work", projectId: "p", projectPath: "/tmp", title: "Reconnect", changeMode: "live", at: 1 });
+      startWorkItemIteration(db, { workItemId: "work", runKey: "primary", idempotencyKey: "start",
+        expectedLifecycleRevision: 0, expectedCurrentRunKey: null, at: 2 });
+      sdkMock.setNextEvents((async function* () {
+        try {
+          yield { type: "thread.started", thread_id: "th-live" };
+          yield { type: "error", message: "Reconnecting... 2/5 (stream disconnected before completion: websocket closed by server before response.completed)" };
+          expect(host.status).toBe("running");
+          expect(getWorkItemRun(db, "primary")).toMatchObject({ ended_at: null, run_outcome: "none" });
+          expect(terminal).not.toHaveBeenCalled();
+          const current = service.getSync("work")!.workItem;
+          expect(() => startWorkItemIteration(db, { workItemId: "work", runKey: "competing",
+            idempotencyKey: "competing", expectedLifecycleRevision: current.lifecycle.lifecycleRevision,
+            expectedCurrentRunKey: "primary", at: 3 })).toThrow();
+          graph.createRevision({ definitionId: "definition", revisionId: "revision", workItemId: "work",
+            workspaceId: "workspace", objective: "Stay usable", acceptanceCriteria: ["scheduled"],
+            nonGoals: [], constraints: [], terminalNodeIds: ["node"], maxActiveAttempts: 1, edges: [],
+            nodes: [{ id: "node", title: "Node", objective: "Do it", inputBindings: {}, outputSchemas: {},
+              constraints: [], acceptanceCriteria: ["done"], executorClass: "standard", allowedHarnesses: ["codex"],
+              allowedTools: [], ownershipRequest: [], budgetRequest: {}, timeoutMs: 30_000,
+              retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableOutcomes: [], jitterMs: 0 },
+              verificationRequired: false, failurePolicy: "fail_graph", expansionPolicy: null }],
+          }, 4);
+          const hash = `sha256:${"a".repeat(64)}`;
+          graph.repo.startRun({ id: "graph", workItemId: "work", primaryRunKey: "primary", revisionId: "revision",
+            expectedLifecycleRevision: current.lifecycle.lifecycleRevision, at: Date.now(), sourceSnapshot: {
+              id: "source", workItemId: "work", primaryRunKey: "primary", taskGraphRevisionId: "revision",
+              repositoryBaseCommit: "abc", dirtyDiffDigest: hash, workspaceId: "workspace", worktreeIdentity: "wt",
+              systemModelDigest: hash, workPacketRevisionId: null, connectedContext: [], compiledSkills: [],
+              harnessPolicyDigest: hash, toolPolicyDigest: hash, createdAt: Date.now(),
+            } });
+          expect((await graph.tick("graph")).run.status).toBe("active");
+          expect(children.startChildRun).toHaveBeenCalledOnce();
+          checkedWhileReconnecting = true;
+          yield { type: "item.completed", item: { id: "final", type: "agent_message", text: "Recovered" } };
+          yield { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1, cached_input_tokens: 0 } };
+        } finally {
+          writerActive = false;
+        }
+      })());
+      bus.subscribe((event) => {
+        if (event.type === "session_error" || (event.type === "session_status" && event["status"] === "idle")) {
+          terminalWriterStates.push(writerActive);
+        }
+      });
+      await host.start({ sessionKey: "primary", workItemId: "work", cwd: "/tmp", prompt: "Continue",
+        harness: "codex", role: "leader", resumeId: "th-live" }, {
+        bus, startChildSession: vi.fn(), forEachLeaderTaskState: vi.fn(), workItemLifecycle: lifecycle,
+        getTaskGraphPlanning: () => ({} as TaskGraphPlanningCoordinator),
+      });
+      expect(checkedWhileReconnecting, host.lastError ?? undefined).toBe(true);
+      expect(terminalWriterStates).toEqual([false]);
+      expect(terminal).toHaveBeenCalledOnce();
+      expect(getWorkItemRun(db, "primary")).toMatchObject({ run_outcome: "completed", final_report: "Recovered" });
+      expect(db.prepare("SELECT terminal_kind FROM run_invocations WHERE run_key = 'primary'").all())
+        .toEqual([{ terminal_kind: "clean" }]);
+    } finally {
+      closePersistDb();
+    }
   });
 
   it("preserves completed when Windows taskkill success output follows turn completion", async () => {

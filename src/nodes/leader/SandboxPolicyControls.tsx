@@ -4,11 +4,12 @@ import {
   type SandboxResolution,
 } from "../../../shared/workspace-contracts.ts";
 import type { HarnessCapabilities } from "../../use-socket.ts";
+import { SANDBOX_ACCESS_OPTIONS, sandboxAccessValue, withSandboxAccess } from "../../sandbox-access.ts";
 
 export { DEFAULT_SANDBOX_POLICY };
 
 const SANDBOX_HELP = {
-  filesystem: "Sets the agent process's file boundary. Read only prevents edits, Workspace write limits edits to authorized project roots, and Full host access removes that boundary.",
+  filesystem: "Sets the agent process's file boundary. Read only prevents edits, Workspace write limits edits to authorized project roots, and Full Host removes that boundary for the Leader only or for the Leader and its Minions.",
   approval: "Controls when guarded actions can ask to run outside the current sandbox. Always ask is strictest; Never ask rejects escalation instead of prompting.",
 } as const;
 
@@ -46,11 +47,14 @@ export function SandboxPolicyControls({ policy, effective, support, disabled = f
           <SandboxHelp axis="file access" description={SANDBOX_HELP.filesystem} />
         </span>
         {support === undefined || (support !== null && support.filesystem.length > 0) ? (
-          <select aria-label="Sandbox file access" value={value.filesystemScope}
-            onChange={(event) => update({ filesystemScope: event.target.value as SandboxPolicy["filesystemScope"] })}>
-            <option value="read-only" disabled={support !== undefined && (support === null || !support.filesystem.includes("read-only"))}>Read only</option>
-            <option value="workspace-write" disabled={support !== undefined && (support === null || !support.filesystem.includes("workspace-write"))}>Workspace write</option>
-            <option value="unrestricted" disabled={support !== undefined && (support === null || !support.filesystem.includes("unrestricted"))}>Full host access</option>
+          <select aria-label="Sandbox file access" value={sandboxAccessValue(value)}
+            onChange={(event) => onChange(withSandboxAccess(value, event.target.value))}>
+            {SANDBOX_ACCESS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}
+                disabled={support !== undefined && (support === null || !support.filesystem.includes(option.filesystemScope))}>
+                {option.label}
+              </option>
+            ))}
           </select>
         ) : <output aria-label="Sandbox file access">Unmanaged by harness</output>}
       </label>

@@ -33,4 +33,15 @@ describe("legacy Canvas work-item reconciliation", () => {
     expect(reconcileLegacyCanvasLeaders([{ ...leader, data: {
       ...leader.data, workItemId: "work-1", workItemSnapshot: item } }], [item])).toEqual([]);
   });
+
+  it.each([false, true])("clears the old transcript when a new run is reconciled (bound: %s)", (bound) => {
+    const node = { ...leader, data: { ...leader.data,
+      ...(bound ? { workItemId: "work-1" } : {}),
+      messages: [{ id: "old", role: "user", content: "Old instruction", timestamp: 1 }],
+      streamingText: "Old partial", historyHighWater: 100, totalCost: 3, turns: 5 } };
+    const patch = reconcileLegacyCanvasLeaders([node], [item],
+      [{ sessionKey: "run-1", workItemId: "work-1" }])[0]!;
+    expect(patch.data).toMatchObject({ sessionKey: "run-2", messages: [], streamingText: "",
+      totalCost: 0, turns: 0, historyHighWater: undefined });
+  });
 });

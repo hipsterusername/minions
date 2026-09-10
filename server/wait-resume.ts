@@ -6,6 +6,9 @@ import type {
 import { persistTaskState } from "./session-persist.ts";
 import {
   cancelCoalescedWake,
+  isHostWakeEligible,
+  MAX_PENDING_WAKES,
+  MAX_PENDING_WAKE_BYTES,
   requestCoalescedWake,
 } from "./wake-coalescer.ts";
 import { serverLogger } from "./logging.ts";
@@ -18,6 +21,7 @@ export interface WaitResumeRequest {
   immediate?: boolean;
   onDelivered?: () => void;
   idempotencyKey?: string;
+  capturedWait?: NonNullable<SessionHost["taskState"]>["pendingWait"];
 }
 
 const queuedWaitResumes = new WeakMap<SessionHost, WaitResumeRequest[]>();
@@ -33,10 +37,12 @@ export function cancelQueuedWaitResume(host: SessionHost): void {
 }
 
 export function pauseActiveRunForWait(host: SessionHost): void {
+  const pendingWait = host.taskState?.pendingWait;
+  const originalControl = host.runControl;
   const timer = setTimeout(() => {
     if (host.status !== "running" || !host.taskState?.pendingWait) return;
     const control = host.runControl;
-    if (!control) return;
+    if (!control || control !== originalControl || host.taskState?.pendingWait !== pendingWait) return;
     try {
       if (control.interrupt) void control.interrupt().catch((err: unknown) => {
         log.warn("interrupt_failed", { sessionKey: host.id, error: err });
@@ -54,13 +60,19 @@ export function requestWaitResume(
   deps: SessionHostDeps,
   request: WaitResumeRequest,
 ): boolean {
+  if (!isHostWakeEligible(host, deps)) return false;
   const continuation: WaitResumeRequest = {
     ...request,
+    capturedWait: host.taskState?.pendingWait ?? null,
+    idempotencyKey: request.idempotencyKey ?? (host.taskState?.pendingWait
+      ? `wait:${host.id}:${host.taskState.pendingWait.scheduledAt}` : request.opts.prompt),
     opts: { ...request.opts, invocationKind: "resume_open_run" },
   };
   if (host.status === "running") {
     host.clearWaitTimer();
     const queued = queuedWaitResumes.get(host) ?? [];
+    if (queued.length >= MAX_PENDING_WAKES || queued.reduce((bytes, entry) => bytes + requestBytes(entry), 0)
+      + requestBytes(continuation) > MAX_PENDING_WAKE_BYTES) return false;
     if (!continuation.idempotencyKey
       || !queued.some((candidate) => candidate.idempotencyKey === continuation.idempotencyKey)) {
       queued.push(continuation);
@@ -80,6 +92,12 @@ export function drainQueuedWaitResume(
   const requests = queuedWaitResumes.get(host);
   if (!requests?.length) return false;
   queuedWaitResumes.delete(host);
+  if (host.workItemId && host.runKind === "primary") {
+    let dispatched = false;
+    for (const request of requests) dispatched = completeWaitAndResume(host, deps,
+      { ...request, immediate: request.immediate ?? true }) || dispatched;
+    return dispatched;
+  }
   const merged = mergeWaitResumes(requests);
   return completeWaitAndResume(host, deps, {
     ...merged,
@@ -126,7 +144,7 @@ function completeWaitAndResume(
   request: WaitResumeRequest,
 ): boolean {
   host.clearWaitTimer();
-  const pendingWait = host.taskState?.pendingWait ?? null;
+  const pendingWait = request.capturedWait === undefined ? host.taskState?.pendingWait ?? null : request.capturedWait;
   return requestCoalescedWake(host, deps, {
     opts: request.opts,
     ...(request.immediate === undefined ? {} : { immediate: request.immediate }),
@@ -134,11 +152,11 @@ function completeWaitAndResume(
     idempotencyKey: request.idempotencyKey
       ?? (pendingWait ? `wait:${host.id}:${pendingWait.scheduledAt}` : undefined),
     onDelivered: () => {
-      if (host.taskState?.pendingWait) {
+      if (host.taskState?.pendingWait === pendingWait && pendingWait) {
         host.taskState.pendingWait = null;
         persistTaskState(host.id, host.taskState);
       }
-      deps.bus.emitToSession(host.id, {
+      if (!host.taskState?.pendingWait) deps.bus.emitToSession(host.id, {
         type: "wait_state",
         sessionKey: host.id,
         action: "completed",
@@ -148,4 +166,9 @@ function completeWaitAndResume(
       request.onDelivered?.();
     },
   });
+}
+
+function requestBytes(request: WaitResumeRequest): number {
+  return Buffer.byteLength(JSON.stringify(request.opts))
+    + Buffer.byteLength(request.idempotencyKey ?? "") + Buffer.byteLength(request.completedReason);
 }

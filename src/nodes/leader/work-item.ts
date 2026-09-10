@@ -3,6 +3,7 @@ import { selectWorkItemPresentation } from "../../../shared/work-item-lifecycle.
 import { formatCoordinatedLabel, type LiveEditAwareness } from "../../../shared/live-edit-coordination.ts";
 import { mergeWorkItemSnapshot } from "../../work-item-snapshot-merge.ts";
 import { randomUuid } from "../../random-id.ts";
+import { canvasRunStreamPatch, type CanvasPendingMessages } from "../../canvas-run-stream.ts";
 
 export interface CanvasWorkItemFields {
   workItemId?: string | null;
@@ -55,7 +56,7 @@ export function errorFromWorkItemResponse(message: unknown): WorkItemCommandErro
   );
 }
 
-export function applyCanvasWorkItemSnapshot<T extends CanvasWorkItemFields>(
+export function applyCanvasWorkItemSnapshot<T extends CanvasWorkItemFields & CanvasPendingMessages & { sessionKey?: string | null }>(
   data: T, snapshot: WorkItemSnapshot,
 ): Omit<T, keyof CanvasWorkItemFields> & { workItemId: string; currentRunKey: string | null; workItemSnapshot: WorkItemSnapshot } {
   if (data.workItemId && data.workItemId !== snapshot.id) return data as Omit<T, keyof CanvasWorkItemFields> & {
@@ -64,6 +65,7 @@ export function applyCanvasWorkItemSnapshot<T extends CanvasWorkItemFields>(
   if (merged === data.workItemSnapshot) return data as Omit<T, keyof CanvasWorkItemFields> & {
     workItemId: string; currentRunKey: string | null; workItemSnapshot: WorkItemSnapshot };
   return { ...data, workItemId: merged.id, currentRunKey: merged.currentRunKey,
+    ...("sessionKey" in data ? canvasRunStreamPatch(data.sessionKey, merged.currentRunKey, data) : {}),
     workItemSnapshot: merged } as Omit<T, keyof CanvasWorkItemFields> & { workItemId: string; currentRunKey: string | null;
       workItemSnapshot: WorkItemSnapshot };
 }

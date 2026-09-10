@@ -267,9 +267,9 @@ async function git(cwd: string, args: string[]): Promise<{ stdout: string; stder
   return { stdout: result.stdout, stderr: result.stderr };
 }
 
-interface CanvasSource { sourceId: string; title: string; content: string }
+export interface CanvasSource { sourceId: string; title: string; content: string }
 
-function splitConnectedContext(value: string | null): CanvasSource[] {
+export function splitConnectedContext(value: string | null): CanvasSource[] {
   if (!value?.trim()) return [];
   const groups = [...value.matchAll(
     /<context-group(?:\s+title="([^"]*)")?>([\s\S]*?)<\/context-group>/g,
@@ -286,15 +286,18 @@ function splitConnectedContext(value: string | null): CanvasSource[] {
   }];
 }
 
-function selectContext(sources: CanvasSource[], selectors: string[]): CanvasSource[] {
+export function selectContext(sources: CanvasSource[], selectors: string[]): CanvasSource[] {
   const canvasSelectors = canvasSelectorQueries(selectors);
-  if (!canvasSelectors.length || !sources.length) return [];
-  const queries = canvasSelectors.map((selector) => selector.toLowerCase()
-    .split(/[^a-z0-9]+/).filter((token) => token.length > 2)).filter((tokens) => tokens.length);
-  return sources.filter((source) => {
-    const title = source.title.toLowerCase();
-    return queries.some((tokens) => tokens.every((token) => title.includes(token)));
-  });
+  const selected = new Set<string>();
+  for (const query of canvasSelectors) {
+    const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const matches = sources.filter(source => source.sourceId === query
+      || (tokens.length > 0 && tokens.every(token => source.title.toLowerCase().includes(token))));
+    if (!matches.length) throw new TaskGraphValidationError(
+      `Context selector canvas:${query} did not match frozen connected context.`);
+    for (const source of matches) selected.add(source.sourceId);
+  }
+  return sources.filter(source => selected.has(source.sourceId));
 }
 
 function canvasSelectorQueries(selectors: string[]): string[] {

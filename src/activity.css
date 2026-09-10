@@ -17,7 +17,7 @@
   flex: 0 0 clamp(320px, 27vw, 380px);
   min-width: 0;
   overflow-y: auto;
-  padding: 0 14px 40px;
+  padding: 0 16px 40px;
   border-right: 1px solid var(--border-default);
   background: var(--bg-secondary);
 }
@@ -26,8 +26,8 @@
   position: sticky;
   top: 0;
   z-index: 3;
-  margin: 0 -14px 18px;
-  padding: 0 14px 12px;
+  margin: 0 -16px 20px;
+  padding: 0 16px 16px;
   border-bottom: 1px solid var(--border-default);
   background: var(--bg-secondary);
 }
@@ -233,7 +233,7 @@
 .act-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0;
+  gap: 6px;
 }
 
 /* ── Needs-you triage lane ─────────────────────────────── */
@@ -241,18 +241,19 @@
 .act-triage-list {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 6px;
 }
 
 .act-triage-row {
   position: relative;
   display: flex;
   align-items: center;
-  height: 52px;
+  min-height: 64px;
   min-width: 0;
-  padding: 0 10px;
-  gap: 8px;
-  border-bottom: 1px solid var(--border-default);
+  padding: 10px 12px;
+  gap: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
   background: var(--bg-surface);
 }
 
@@ -269,7 +270,7 @@
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding: 7px 0;
+  padding: 0;
   text-align: left;
   color: inherit;
   font: inherit;
@@ -443,12 +444,13 @@
   position: relative;
   display: flex;
   align-items: center;
-  height: 52px;
+  min-height: 64px;
   min-width: 0;
-  padding: 0 10px;
-  gap: 8px;
+  padding: 10px 12px;
+  gap: 10px;
   text-align: left;
-  border-bottom: 1px solid var(--border-default);
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
   background: var(--bg-surface);
   transition: background 120ms ease;
 }
@@ -463,7 +465,7 @@
   justify-content: center;
   gap: 2px;
   height: 100%;
-  padding: 7px 0;
+  padding: 0;
   text-align: left;
   color: inherit;
   font: inherit;
@@ -481,26 +483,75 @@
   box-shadow: inset 2px 0 var(--status-warning);
 }
 
+.act-triage-row--selected,
+.act-card--selected,
 .act-triage-row--checked,
 .act-card--checked {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border-default));
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-surface));
+}
+
+.act-triage-row:is(.act-triage-row--selected, .act-triage-row--checked):hover,
+.act-card:is(.act-card--selected, .act-card--checked):hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-surface));
 }
 
 /* ── Selection checkbox ────────────────────────────────── */
 
 .act-select {
-  flex-shrink: 0;
+  flex: 0 0 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 24px;
+  min-height: 32px;
   cursor: pointer;
 }
 
 .act-select input {
-  width: 15px;
-  height: 15px;
+  appearance: none;
+  display: grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--border-hover);
+  border-radius: 5px;
+  background: var(--bg-secondary);
+  color: var(--bg-primary);
   cursor: pointer;
   accent-color: var(--accent);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.act-select input::before {
+  content: "";
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border: solid currentColor;
+  border-width: 0 0 2px 2px;
+  transform: rotate(-45deg);
+  visibility: hidden;
+}
+
+.act-select:hover input { border-color: var(--accent); }
+
+.act-select input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.act-select input:checked::before { visibility: visible; }
+
+.act-select input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+@media (forced-colors: active) {
+  .act-select input { appearance: auto; }
+  .act-select input::before { content: none; }
 }
 
 /* ── Lifecycle action error banner ─────────────────────── */
@@ -716,10 +767,10 @@
 /* Touch layouts keep actions visible; hover-capable layouts use an overlay below. */
 .act-triage-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
   height: auto;
-  gap: 3px 8px;
-  padding-block: 8px;
+  gap: 6px 10px;
+  padding-block: 10px;
 }
 .act-triage-main { padding: 0; }
 .act-triage-actions {
@@ -2663,26 +2714,10 @@
   justify-content: space-between;
   gap: 12px;
 }
-.leader-launch-project {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0 7px;
-  align-items: center;
-  min-width: 0;
-  max-width: 52%;
-  padding: 6px 8px;
-  color: var(--accent);
-  border: 1px solid var(--border-default);
-  border-radius: 7px;
-  background: var(--bg-primary);
-}
-.leader-launch-project > span { display: grid; min-width: 0; }
-.leader-launch-project strong,
-.leader-launch-project small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.leader-launch-project strong { color: var(--text-secondary); font-size: 12px; }
-.leader-launch-project small { color: var(--text-dim); font: 11.5px/1.3 var(--font-mono); }
+.leader-launch-workspace { flex: 0 1 180px; min-width: 130px; }
 .leader-launch-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .leader-launch-config-grid > .leader-launch-field:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
 .leader-launch-toggle { display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-primary); cursor: pointer; }
 .leader-launch-toggle input { margin: 3px 0 0; accent-color: var(--accent); }
 .leader-launch-toggle span { display: grid; gap: 3px; }
@@ -2776,7 +2811,6 @@
     border-top: 1px solid var(--border-default);
     border-left: 0;
   }
-  .leader-launch-project { max-width: 100%; width: 100%; box-sizing: border-box; }
 }
 
 @container leader-launch (max-width: 520px) {
@@ -2785,6 +2819,7 @@
   .leader-launch-starters { width: 100%; }
   .leader-launch-starters button { flex: 1; }
   .leader-launch-settings-head { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .leader-launch-workspace { flex-basis: auto; width: 100%; }
   .leader-launch-config-grid { grid-template-columns: minmax(0, 1fr); }
   .leader-launch-config-grid > .leader-launch-field:last-child:nth-child(odd) { grid-column: auto; }
   .leader-launch-prompt [data-testid="leader-prompt-bar-overlay"] { flex-direction: column; align-items: stretch !important; }
@@ -3063,10 +3098,10 @@
 .leader-launch-work { overflow-y: auto; }
 
 @media (max-width: 1440px) {
-  .act-main { flex-basis: clamp(280px, 23vw, 320px); padding-inline: 10px; }
+  .act-main { flex-basis: clamp(280px, 23vw, 320px); padding-inline: 12px; }
   .act-section { margin-bottom: 18px; }
   .act-section-head { margin-bottom: 8px; }
-  .act-list-toolbar { margin-inline: -10px; padding-inline: 10px; margin-bottom: 12px; }
+  .act-list-toolbar { margin-inline: -12px; padding-inline: 12px; margin-bottom: 16px; }
   .act-triage-title, .act-card-title {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -3076,13 +3111,13 @@
     line-height: 18px;
   }
   .act-triage-line, .act-card-top { align-items: flex-start; }
-  .act-card { height: auto; min-height: 52px; }
+  .act-card { height: auto; min-height: 64px; }
   .act-triage-row {
     display: grid;
-    grid-template-columns: 14px minmax(0, 1fr);
+    grid-template-columns: 24px minmax(0, 1fr);
     height: auto;
-    gap: 2px 8px;
-    padding-block: 6px;
+    gap: 6px 10px;
+    padding-block: 10px;
   }
   .act-triage-main, .act-triage-row:is(:hover, :focus-within) .act-triage-main { padding: 0; }
   .act-triage-actions {
@@ -3112,7 +3147,7 @@
 @media (max-width: 900px) {
   .act-main { flex: 1; }
   .act-root:has(.act-inspector) .act-main,
-  .act-root:has(.act-launch-panel) .act-main { display: none; }
+  .act-root:has(.act-launch-panel:not([hidden])) .act-main { display: none; }
   .act-inspector, .act-launch-panel, .act-empty-workspace {
     width: 100%;
     box-shadow: none;
@@ -3154,16 +3189,17 @@
 .act-triage-row .act-mini-btn--primary:hover { border-color: var(--text-secondary); }
 @media (pointer: coarse) {
   .act-triage-actions button, .act-card-actions button { min-width: 44px; min-height: 44px; }
+  .act-select { min-height: 44px; }
 }
 
 @media (hover: hover) and (pointer: fine) {
   .act-card,
   .act-triage-row {
     height: auto;
-    min-height: 48px;
+    min-height: 64px;
   }
 
-  .act-card-main { padding-block: 5px; }
+  .act-card-main { padding-block: 0; }
 
   .act-triage-actions,
   .act-card-actions {
@@ -3190,6 +3226,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .act-select input,
   .act-triage-actions,
   .act-card-actions,
   .act-triage-actions button,
@@ -3202,3 +3239,20 @@
 
 .act-session-more__chevron { flex-shrink: 0; color: var(--text-muted); }
 .act-session-more[open] .act-session-more__chevron { transform: rotate(90deg); }
+
+/* Keep the draft renderer mounted while browsing so its prompt and uploads survive. */
+.act-launch-panel[hidden], .act-empty-workspace[hidden] { display: none; }
+.act-root--composing .act-main { display: none; }
+.act-root--composing .act-launch-panel { position: relative; width: 100%; border-left: 0; box-shadow: none; }
+.act-draft-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.act-empty-workspace > .act-draft-back { position: absolute; top: 12px; left: 18px; z-index: 1; }
+.act-draft-notice { display: grid; gap: 12px; margin: 12px 0; padding: 14px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 5%, var(--bg-surface)); }
+.act-draft-notice-copy { display: grid; gap: 5px; min-width: 0; }
+.act-draft-notice-label { color: var(--accent); font-size: 11px; font-weight: 650; }
+.act-draft-notice strong { color: var(--text-primary); font-size: 14px; overflow-wrap: anywhere; }
+.act-draft-notice p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.act-draft-notice-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.act-launch-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.act-launch-head > .act-draft-back { grid-column: 1 / -1; justify-self: start; }
+.act-root--composing .act-empty-workspace { position: relative; padding-top: 48px; box-sizing: border-box; }

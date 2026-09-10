@@ -121,11 +121,22 @@ describe("SessionChatScreen", () => {
         snapshot,
       } as never)));
 
+      fireEvent.click(screen.getByRole("button", { name: "Work" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Dashboard/ }));
       fireEvent.click(await screen.findByRole("button", { name: /Graph/ }));
       expect(screen.getByRole("dialog", { name: /10-node research graph/ })).toBeInTheDocument();
       expect(screen.queryByRole("complementary", { name: "Authored execution plan" })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Close graph inspector" }));
       expect(screen.queryByRole("dialog", { name: /10-node research graph/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Work" })).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("button", { name: /^Dashboard/ })).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+      fireEvent.click(screen.getByRole("button", { name: "Work" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /Graph/ }));
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Work" })).toHaveAttribute("aria-current", "page");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
     }
@@ -182,7 +193,8 @@ describe("SessionChatScreen", () => {
     expect(screen.getByText(/timeout: 120000/)).toBeInTheDocument();
   });
 
-  it("copies a response after a deliberate horizontal swipe", async () => {
+  it.each(["Copy this response", JSON.stringify({ result: "inconclusive", confidence: 0.98,
+    summary: "Host checks unavailable." }), JSON.stringify({ summary: "Host checks unavailable." })])("copies the original response after a deliberate horizontal swipe: %s", async (content) => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -191,11 +203,17 @@ describe("SessionChatScreen", () => {
     const message: DisplayMessage = {
       id: "assistant-1",
       role: "assistant",
-      content: "Copy this response",
+      content,
       timestamp: 1,
     };
 
     render(<MessageBubble message={message} />);
+
+    if (content.startsWith("{")) {
+      expect(screen.getByText("Host checks unavailable.")).not.toBeVisible();
+      fireEvent.click(screen.getByText("View report details"));
+      expect(screen.getByText("Host checks unavailable.")).toBeVisible();
+    }
 
     const response = screen.getByRole("article");
     fireEvent.touchStart(response, {
@@ -205,7 +223,7 @@ describe("SessionChatScreen", () => {
       changedTouches: [{ identifier: 1, clientX: 100, clientY: 86 }],
     });
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Copy this response"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(content));
     expect(screen.getByRole("status")).toHaveTextContent("Copied");
   });
 
@@ -284,13 +302,13 @@ describe("SessionChatScreen", () => {
     };
     const { rerender } = render(<SessionChatScreen {...props} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Connecting to leader…");
+    expect(screen.getByRole("heading", { name: "Connecting to leader…" })).toBeInTheDocument();
     expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument();
 
     rerender(<SessionChatScreen {...props} session={leaderSession({ status: "running" })} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Leader is thinking…");
-    expect(screen.getByRole("status").querySelectorAll(".mob-chat-activity-dots i")).toHaveLength(3);
+    expect(screen.getByRole("heading", { name: "Leader is thinking…" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Leader is thinking…" }).closest("[role=status]")!.querySelectorAll(".mob-chat-activity-dots i")).toHaveLength(3);
   });
 
   it("syncs the session on mount", async () => {
@@ -503,6 +521,7 @@ describe("SessionChatScreen", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     fireEvent.click(screen.getByRole("button", { name: /plan/i }));
 
     const dashboard = screen.getByRole("region", { name: "Active minions" });
@@ -543,6 +562,7 @@ describe("SessionChatScreen", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     fireEvent.click(screen.getByRole("button", { name: /plan/i }));
 
     expect(screen.getByText("Repair API test coverage")).toBeInTheDocument();
@@ -605,7 +625,7 @@ describe("SessionChatScreen", () => {
               status: "completed",
               createdAt: 4,
               completedAt: 5,
-              result: "Lint passed.",
+              result: JSON.stringify({ summary: "Lint passed." }),
             },
           ],
           activeMinions: [
@@ -623,6 +643,7 @@ describe("SessionChatScreen", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     fireEvent.click(screen.getByRole("button", { name: /plan/i }));
 
     expect(screen.getByText("1/4 complete")).toBeInTheDocument();
@@ -661,6 +682,7 @@ describe("SessionChatScreen", () => {
     expect(within(strip).getByText("Editing SessionChatScreen.tsx")).toBeInTheDocument();
 
     // ...and still visible after switching to the Plan tab.
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     fireEvent.click(screen.getByRole("button", { name: /plan/i }));
     expect(screen.getByRole("region", { name: "Leader activity" })).toBeInTheDocument();
   });
@@ -680,6 +702,7 @@ describe("SessionChatScreen", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     const planTab = screen.getByRole("button", { name: /plan/i });
     expect(planTab.querySelector('span[data-live="true"]')).not.toBeNull();
   });
@@ -699,6 +722,7 @@ describe("SessionChatScreen", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     const planTab = screen.getByRole("button", { name: /plan/i });
     expect(planTab.querySelector("span")).not.toBeNull();
     expect(planTab.querySelector('span[data-live="true"]')).toBeNull();
@@ -720,6 +744,7 @@ describe("SessionChatScreen", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     fireEvent.click(screen.getByRole("button", { name: /dashboard/i }));
 
     expect(screen.getByText("Build status")).toBeInTheDocument();
@@ -748,6 +773,7 @@ describe("SessionChatScreen", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     fireEvent.click(screen.getByRole("button", { name: /dashboard/i }));
     fireEvent.click(screen.getByRole("button", { name: /submit/i }));
 

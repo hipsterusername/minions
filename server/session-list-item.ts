@@ -102,7 +102,7 @@ function harnessMeta(name: string): {
 /** Derive the broadcastable list item for one live host. */
 export function buildSessionListItem(key: string, s: SessionHost): SessionListItem {
   const { harness, harnessCapabilities } = harnessMeta(s.harnessName);
-  const lastActivityAt = lastResponseOrActivityAt(s.eventBuffer);
+  const lastActivityAt = s.historyFacts.lastResponseAt ?? s.historyFacts.lastActivityAt;
   let projectId: string | undefined;
   try {
     projectId = findWorkspaceBySource(s.worktree?.projectPath ?? s.cwd)?.id;

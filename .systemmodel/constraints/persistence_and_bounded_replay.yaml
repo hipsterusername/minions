@@ -1,6 +1,6 @@
 id: constraint.persistence_and_bounded_replay
 type: constraint
-statement: Recovery-critical host and workflow state, including waits and undelivered task attention, is persisted; sync reports actual host truth while replay buffers remain bounded.
+statement: Recovery-critical host and workflow state, including waits and undelivered task attention, is persisted; sync reports actual host truth while transcript residency and replay pages are bounded by bytes and count.
 applies_to:
   capabilities: []
   flows: []
@@ -17,6 +17,12 @@ applies_to:
     - server/session-registry-start.ts
     - server/session-host.ts
     - server/session-persist.ts
+    - server/history-cache.ts
+    - server/session-history.ts
+    - server/session-history-host.ts
+    - server/routes/history.ts
+    - server/history-auth.ts
+    - shared/history.ts
     - server/session-task-state-persist.ts
     - server/session-registry.ts
     - server/session-registry-recovery.ts
@@ -24,7 +30,7 @@ applies_to:
     - server/commands/sync-session.ts
     - src/session-stream.ts
 severity: critical
-agent_instruction: Fence removed hosts against late writes, explicitly reject busy legacy messages, commit host snapshots atomically and surface persistence failures, retry transient database-open failures, and disconnect slow WebSocket consumers at the queue bound. Persist harness, model, permissions, skills, complete task snapshots, pending waits, attention delivery, render, approval, review, and worktree state; hydrate the full session graph before reconciliation; keep event buffers capped and sync full state before incremental folding. Archive full user instructions in chronological order, restore skill selections and variables before automatic wakes, and retain objective, corrections and semantic evidence in bounded checkpoint sections. Fresh iterations without compatible provider history require a server-owned handoff with prior-run evidence and archive references.
+agent_instruction: Fence removed hosts against late writes, explicitly reject busy legacy messages, commit host snapshots atomically and surface persistence failures, retry transient database-open failures, and disconnect slow WebSocket consumers at the queue bound. Persist harness, model, permissions, skills, complete task snapshots, pending waits, attention delivery, render, approval, review, and worktree state; hydrate the full session graph and recovery facts before reconciliation without eagerly loading historical transcript bodies. Bound transcript caches globally and per session by bytes and event count; measure payloads before parsing, preserve exact oversized events durably, and expose authenticated bounded history/downloads. Keep activity and semantic recovery independent of cache residency; sync full state before incremental folding, preserve stable event identities, and merge live events across paged replay. Archive full user instructions in chronological order, restore skill selections and variables before automatic wakes, and retain objective, corrections and semantic evidence in bounded checkpoint sections. Fresh iterations without compatible provider history require a server-owned handoff with prior-run evidence and archive references.
 suggested_tests: [ server/session-handoff.test.ts, server/session-launch.test.ts, server/bus.test.ts, server/commands/remove-session.test.ts, server/commands/send-message.test.ts, server/session-persist.test.ts, server/session-registry.test.ts, server/commands/sync-session.test.ts, server/session-host.test.ts, src/session-stream.test.ts ]
 evidence: [ decision.typed_event_bus ]
 domain: domain.observability

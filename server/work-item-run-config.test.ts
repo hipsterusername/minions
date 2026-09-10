@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { resolvePrimaryRunConfig } from "./work-item-run-config.ts";
+import { compatibleResumeId, resolvePrimaryRunConfig } from "./work-item-run-config.ts";
 
 describe("primary run planning config", () => {
+  it("does not reuse a defaulted provider thread when switching harnesses", () => {
+    const previous = { session_id: "claude-thread", harness_name: "claude",
+      run_config_json: JSON.stringify({ orchestrationMode: "auto" }) };
+    expect(compatibleResumeId(previous, { harness: "codex" })).toBeUndefined();
+    expect(compatibleResumeId(previous, { harness: "claude" })).toBe("claude-thread");
+  });
   it("persists Task Graph auto mode when a canonical launch omits the planning mode", () => {
     const { config, json } = resolvePrimaryRunConfig(null, { prompt: "Build it" });
 

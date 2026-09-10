@@ -75,6 +75,30 @@ function setup() {
 }
 
 describe("TaskGraphService central wiring",() => {
+  it("dispatches and persists a compact context while preserving constraints and output obligations", async () => {
+    const db = setup(); const { bus } = fakeBus();
+    const children: Array<Record<string, unknown>> = [];
+    const service = new TaskGraphService({ db, bus, children: {
+      startChildRun: async input => { children.push(input); return childSnapshot(input.attemptId, input.attemptNumber); },
+    } });
+    const graph = revision();
+    graph.constraints = ["Preserve project invariants"];
+    graph.nodes[0]!.context = { profile: "compact", instructions: ["Return one word red"],
+      references: [{ id: "sample", title: "Sample", content: "REFERENCE_ONLY" }] };
+    graph.nodes[0]!.outputSchemas = { result: { type: "object" } };
+    service.createRevision(graph, 3);
+    await service.startRun({ id: "graph", workItemId: "work", primaryRunKey: "primary", revisionId: "revision",
+      sourceSnapshot: source(), expectedLifecycleRevision: 1, at: 4 });
+    expect(children).toHaveLength(1);
+    expect(children[0]!.systemPrompt).toContain("Return one word red");
+    expect(children[0]!.systemPrompt).not.toContain("REFERENCE_ONLY");
+    expect(children[0]!.prompt).toContain("REFERENCE_ONLY");
+    expect(children[0]!.prompt).toContain("Preserve project invariants");
+    expect(children[0]!.prompt).toContain("stage_output_artifact");
+    expect(service.repo.getRevision("revision").nodes[0]!.context).toEqual(graph.nodes[0]!.context);
+    db.close();
+  });
+
   it("counts pending admissions across concurrent graph runs sharing one slot", async () => {
     const db=setup(); const {bus}=fakeBus();
     createWorkItem(db,{id:"work2",projectId:"project",projectPath:process.cwd(),title:"Second",changeMode:"live",at:1});

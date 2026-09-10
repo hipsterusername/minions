@@ -67,6 +67,18 @@ afterEach(() => {
 });
 
 describe("ReviewChangesScreen", () => {
+  it("does not offer approval when browsing an embedded session with no pending decision", () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+    const socket = fakeSocket();
+    render(<ReviewChangesScreen embedded sessionKey="s-1" send={vi.fn()} subscribe={socket.subscribe} onClose={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Approve & Merge" })).not.toBeInTheDocument();
+    act(() => socket.deliver({ type: "control_response", command: "get_worktree_diff", success: true,
+      sessionKey: "s-1", requestId, diff: { ...diff, filesChanged: 0, files: [], commits: [] } }));
+    expect(screen.getByRole("heading", { name: "No changes to review" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve & Merge" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+  });
+
   it("requests the worktree diff on mount", async () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
     const socket = fakeSocket();
@@ -226,12 +238,16 @@ describe("ReviewChangesScreen", () => {
     const send = vi.fn();
     render(<ReviewChangesScreen sessionKey="s-1" workItemId="work-1" changeMode="live"
       send={send} subscribe={socket.subscribe} onClose={() => {}} />);
-    expect(screen.getByRole("main", { name: "Live changes" })).toHaveTextContent(
-      "Live changes are applied directly",
+    expect(screen.getByRole("main", { name: "Workspace changes" })).toHaveTextContent(
+      "Changes can’t be attributed to individual agents.",
     );
     expect(screen.queryByTestId("worktree-integration-controls")).toBeNull();
     expect(screen.queryByRole("button", { name: "Approve & Merge" })).toBeNull();
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "get_worktree_diff", sessionKey: "s-1" }));
+    const request = send.mock.calls.find(([message]) => message.type === "get_worktree_diff")![0];
+    act(() => socket.deliver({ type: "control_response", command: "get_worktree_diff",
+      sessionKey: "s-1", requestId: request.requestId, success: true, diff }));
+    expect(screen.getByText(diff.files[0]!.file)).toBeVisible();
   });
 
   it("reveals conflict resolution actions after merge failure", async () => {

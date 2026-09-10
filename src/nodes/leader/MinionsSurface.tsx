@@ -4,7 +4,7 @@ import type { SessionStreamState, SessionStreamStatus } from "../../session-stre
 import { useSessionStream } from "../../use-session-stream.ts";
 import type { SocketSubscribe } from "../../use-socket.ts";
 import { CopyButton } from "../../components/CopyButton.tsx";
-import { SimpleMarkdown } from "../../components/SimpleMarkdown.tsx";
+import { AgentMessageText } from "../../components/AgentMessageText.tsx";
 import type { TaskPlanItem } from "./types.ts";
 
 const STATUS_COLOR: Record<TaskPlanItem["status"], string> = {
@@ -290,11 +290,11 @@ function MinionDetail({ task, index, stream }: { task: TaskPlanItem; index: numb
           )}
           {stream.streamingText && (
             <div style={{ padding: "8px 9px", borderRadius: 6, background: "color-mix(in srgb, var(--accent) 7%, var(--bg-primary))", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.45 }}>
-              <SimpleMarkdown text={stream.streamingText} />
+              <AgentMessageText text={stream.streamingText} />
             </div>
           )}
           {!hasActivity && <div style={{ padding: "18px 8px", textAlign: "center", fontSize: 11, lineHeight: 1.5, color: "var(--text-muted)" }}>{task.minionSessionKey ? "Waiting for the first log entry…" : "This subagent reports progress through the leader."}</div>}
-          {task.result && <div style={{ padding: "9px 10px", borderRadius: 6, background: task.status === "completed" ? "var(--success-bg)" : "var(--warning-bg)", color: task.status === "completed" ? "var(--success-color)" : "var(--text-secondary)", fontSize: 11, lineHeight: 1.45 }}><SimpleMarkdown text={task.result} /></div>}
+          {task.result && <div style={{ padding: "9px 10px", borderRadius: 6, background: task.status === "completed" ? "var(--success-bg)" : "var(--warning-bg)", color: task.status === "completed" ? "var(--success-color)" : "var(--text-secondary)", fontSize: 11, lineHeight: 1.45 }}><AgentMessageText text={task.result} /></div>}
         </div>
       </div>
     </section>
@@ -311,7 +311,7 @@ function ActivityEntry({ message }: { message: DisplayMessage }) {
       <CopyButton text={message.content} title={`Copy ${ROLE_LABEL[message.role]} message to clipboard`} />
       <span style={{ fontSize: 9, color: message.role === "result" ? "var(--success-color)" : "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{ROLE_LABEL[message.role]}</span>
       <div style={{ minWidth: 0, fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)", whiteSpace: isMarkdown ? "normal" : "pre-wrap", overflowWrap: "anywhere" }}>
-        {isMarkdown ? <SimpleMarkdown text={message.content} /> : message.content}
+        {isMarkdown ? <AgentMessageText text={message.content} /> : message.content}
       </div>
     </div>
   );

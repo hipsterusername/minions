@@ -25,7 +25,7 @@ export function canvasReducer(
       const next = [...state, action.node];
       const owner = (action.node.data as { leaderId?: string } | null)?.leaderId;
       const owned = (action.node.type === "minion" || action.node.type === "render") && owner && state.some(n => n.id === owner && n.type === "leader");
-      const workspace = owned ? zoneMembership(state).get(owner)?.id ?? GLOBAL_WORKSPACE_ID : activeWorkspaceId(state);
+      const workspace = owned ? zoneMembership(state).get(owner)?.id ?? GLOBAL_WORKSPACE_ID : action.workspaceId ?? activeWorkspaceId(state);
       if (action.node.type === ZONE_NODE_TYPE || workspace === GLOBAL_WORKSPACE_ID) return next;
       const content = next.filter(n => n.type !== ZONE_NODE_TYPE || n.id === GLOBAL_WORKSPACE_ID);
       return [...content, ...readZones([...content, ...moveToZone(readZones(next), [action.node.id], workspace)])];

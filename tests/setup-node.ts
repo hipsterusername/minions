@@ -3,6 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll } from "vitest";
 
+// Commit hooks inherit checkout overrides from Git. Fixture repositories must
+// resolve their own metadata, especially worktrees whose .git is a file.
+for (const key of ["GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"]) {
+  delete process.env[key];
+}
+
 // Run in both Vitest projects before each file imports application modules.
 // A shared runner-level directory allows unrelated suites to contaminate the
 // registry and session DB.

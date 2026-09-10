@@ -13,6 +13,7 @@ import { serverLogger } from "./logging.ts";
 import { getHarness } from "./harness/index.ts";
 import { getLiveEditCoordinator } from "./live-edit-runtime.ts";
 import { RunMutationCoordination } from "./mutation-coordination.ts";
+import { sandboxPolicyForMinion } from "./harness/sandbox-policy.ts";
 
 const log = serverLogger.child("session-host");
 
@@ -99,6 +100,8 @@ export function buildAgentContext(
       resumeId: params.sessionKey === host.id ? host.sessionId ?? undefined : undefined,
       harness: params.harness ?? host.harnessName,
       permissionMode: params.permissionMode,
+      sandboxPolicy: isResume ? host.sandboxPolicy?.requested
+        : sandboxPolicyForMinion(host.sandboxPolicy?.requested, undefined),
       executorClass: params.executorClass,
       skillIds: params.skillIds,
       skillSnapshotId: params.skillSnapshotId,

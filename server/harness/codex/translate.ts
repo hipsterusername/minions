@@ -269,8 +269,15 @@ export function createCodexTranslator(ctx: TranslatorContext): CodexTranslator {
         case "turn.failed":
           return [{ kind: "done", reason: "error", error: evt.error.message }];
 
-        case "error":
+        case "error": {
+          // Codex also uses ThreadErrorEvent for retry progress. Keep the
+          // known reconnect notice nonterminal; other errors remain fatal.
+          const reconnect = /^Reconnecting\.{3}\s+([1-9]\d*)\/[1-9]\d*(?:\s+\([\s\S]*\))?$/.exec(evt.message.trim());
+          if (reconnect) {
+            return [{ kind: "api_retry", attempt: Number(reconnect[1]), reason: evt.message }];
+          }
           return [{ kind: "done", reason: "error", error: evt.message }];
+        }
 
         default:
           return [];

@@ -82,7 +82,7 @@ describe("planning runtime installation", () => {
         subscribe:()=>()=>{}};
       const leader=new SessionHost("primary","/tmp/work");
       leader.status="idle";leader.role="leader";leader.workItemId="work";leader.runKind="primary";
-      const resumeWorkItemRun=vi.fn().mockRejectedValueOnce(new Error("transient"))
+      const resumeWorkItemRun=vi.fn().mockRejectedValueOnce(Object.assign(new Error("transient"), { code: "SQLITE_BUSY" }))
         .mockResolvedValueOnce(undefined);
       const sessionDeps={bus,startChildSession:vi.fn(),resumeWorkItemRun,
         forEachLeaderTaskState:()=>{}} as unknown as SessionHostDeps;
@@ -97,7 +97,7 @@ describe("planning runtime installation", () => {
       await Promise.resolve();
       expect(resumeWorkItemRun).toHaveBeenCalledOnce();
       expect(acknowledge).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(16_500);
       expect(resumeWorkItemRun).toHaveBeenCalledTimes(2);
       await Promise.resolve();
       expect(acknowledge).toHaveBeenCalledOnce();

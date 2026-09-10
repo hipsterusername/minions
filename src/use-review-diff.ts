@@ -13,8 +13,10 @@ export function useReviewDiff(sessionKey: string, send: ((data: unknown) => void
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const pending = useRef<string | null>(null);
+  const canAutoRefresh = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
+    canAutoRefresh.current = false;
     clearTimeout(timer.current);
     if (!send || !subscribe) { setError("Changes unavailable: connection required."); return; }
     const requestId = randomUuid();
@@ -48,13 +50,17 @@ export function useReviewDiff(sessionKey: string, send: ((data: unknown) => void
       pending.current = null;
       setLoading(false);
       if (message.success && message["diff"]) {
+        canAutoRefresh.current = true;
         setDiff(message["diff"] as Diff);
         setLoadedAt(Date.now());
         setError(null);
       } else setError(message.error ?? "Couldn’t load changes");
     });
     refresh();
-    return () => { unsubscribe?.(); clearTimeout(timer.current); pending.current = null; };
+    const poll = setInterval(() => {
+      if (canAutoRefresh.current && !pending.current && document.visibilityState !== "hidden") refresh();
+    }, 5000);
+    return () => { unsubscribe?.(); clearInterval(poll); clearTimeout(timer.current); pending.current = null; };
   }, [refresh, sessionKey, subscribe]);
   return { diff, loading, error, loadedAt, refresh };
 }

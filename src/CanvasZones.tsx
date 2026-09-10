@@ -1,19 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FolderInput, Plus, Globe, Check, ChevronDown, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { FolderInput, Plus, Check, ChevronDown, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { UndoNotification } from "./components/UndoNotification.tsx";
 import { ViewportOverlay } from "./components/ViewportOverlay.tsx";
-import { GLOBAL_WORKSPACE_ID, visibleZoneNodes, zoneSummary, type CanvasZone } from "./canvas-zones.ts";
+import { GLOBAL_WORKSPACE_ID, visibleZoneNodes, zoneSummary } from "./canvas-zones.ts";
 import { SkillIcon } from "./components/SkillIcon.tsx";
 import { SkillIconPicker } from "./components/SkillIconPicker.tsx";
+import { WorkspaceIcon } from "./components/WorkspaceIcon.tsx";
 import type { CanvasNode, CanvasTransform } from "./types.ts";
 import type { CanvasZonesController } from "./use-canvas-zones.ts";
 import "./canvas-zones.css";
-
-function WorkspaceIcon({ zone, size = 16 }: { zone: CanvasZone; size?: number }) {
-  if (zone.id === GLOBAL_WORKSPACE_ID) return <Globe size={size} />;
-  return <SkillIcon skill={{ icon: zone.data.icon ?? "minions:folder", category: "general" }} size={size} />;
-}
 
 function ZoneDialog({ controller: c }: { controller: CanvasZonesController }) {
   const ref = useRef<HTMLDialogElement>(null);

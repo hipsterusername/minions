@@ -1394,7 +1394,8 @@ article.mob-plan-row {
   gap: 6px;
 }
 
-.mob-plan-details p {
+.mob-plan-details p,
+.mob-plan-result {
   margin: 0;
   display: grid;
   gap: 3px;
@@ -1404,7 +1405,8 @@ article.mob-plan-row {
   line-height: 1.35;
 }
 
-.mob-plan-details p span {
+.mob-plan-details p span,
+.mob-plan-result > span {
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 800;
@@ -4111,4 +4113,63 @@ article.mob-plan-row {
   .mob-composer { padding-block: 6px; }
   .mob-chat-tabs { padding-block: 0; }
   .mob-tabbar { padding-block: 0 env(safe-area-inset-bottom); }
+}
+
+/* Project home → session workspace. All session views share this shell. */
+.mob-app-header-actions .mob-header-action { display: inline-flex; align-items: center; justify-content: center; }
+.mob-connection-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--status-success); }
+.mob-connection-dot:not([data-state="connected"]) { background: var(--status-warning); }
+.mob-session-context {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: calc(4px + env(safe-area-inset-top)) var(--mob-safe-right) 4px var(--mob-safe-left);
+  background: var(--bg-secondary); border-bottom: 1px solid var(--border-default);
+}
+.mob-session-context button {
+  min-height: 44px; min-width: 44px; padding: 4px 0; border: 0; background: transparent;
+  color: var(--text-secondary); font: inherit; font-size: 12px; text-align: left;
+}
+.mob-session-context button:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mob-session-connection { flex: none; color: var(--text-muted); font-size: 11px; }
+.mob-session-connection[data-connected="false"] { color: var(--status-warning); }
+.mob-chat > .mob-chat-header { padding-top: 8px; gap: 8px; }
+.mob-session-switch-control {
+  position: relative; display: grid; place-items: center; flex: none;
+  width: 44px; height: 44px; border: 1px solid var(--border-default);
+  border-radius: 8px; font-size: 20px; background: var(--bg-elevated);
+}
+.mob-session-switch-control select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; cursor: pointer; }
+.mob-session-switch-control:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mob-workspace-tabs { display: flex; flex: none; border-bottom: 1px solid var(--border-default); background: var(--bg-secondary); }
+.mob-workspace-tabs button {
+  flex: 1; min-width: 0; min-height: 44px; border: 0; background: transparent;
+  color: var(--text-secondary); font: inherit; font-size: 13px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.mob-workspace-tabs button[aria-current="page"] { color: var(--accent); box-shadow: inset 0 -2px var(--accent); }
+.mob-chat-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mob-chat-tabs[data-has-graph="true"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mob-session-changes { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.mob-session-changes > .mob-review { width: 100%; }
+.mob-session-offline { flex: none; margin: 0; padding: 6px var(--mob-safe-right) 6px var(--mob-safe-left); font-size: 12px; color: var(--status-warning); }
+.mob-session-decision {
+  flex: none; max-height: 25%; overflow: auto; padding: 10px var(--mob-safe-right) 10px var(--mob-safe-left);
+  border-bottom: 1px solid var(--border-default); background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary));
+}
+.mob-session-decision strong { font-size: 13px; }
+.mob-session-decision p { font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px; overflow-wrap: anywhere; }
+.mob-resume-session {
+  display: grid; gap: 4px; width: 100%; min-height: 60px; padding: 12px; margin-bottom: 16px;
+  text-align: left; border: 1px solid var(--border-default); border-radius: 8px;
+  background: var(--bg-surface); color: var(--text-primary); font: inherit;
+}
+.mob-resume-session span { color: var(--text-muted); font-size: 12px; }
+.mob-resume-session strong { font-size: 14px; overflow-wrap: anywhere; }
+.mob-app[data-keyboard="open"] .mob-workspace-tabs,
+.mob-app[data-keyboard="open"] .mob-session-decision { display: none; }
+.mob-app[data-keyboard="open"] .mob-session-context { padding-block: 0; }
+.mob-app[data-keyboard="open"] .mob-session-context button { min-height: 44px; }
+@media (max-width: 360px) {
+  .mob-app-header { gap: 6px; }
+  .mob-app-header-main, .mob-app-header-actions { gap: 4px; }
+  .mob-app-header-actions .mob-connection-dot { display: none; }
 }

@@ -1,7 +1,7 @@
-import Ajv,{type AnySchema,type ErrorObject} from "ajv";
+import type {ErrorObject} from "ajv";
 import {TaskGraphValidationError} from "./errors.ts";
+import {artifactValidator} from "./artifact-schema-cache.ts";
 
-const validator=new Ajv({strict:false,allErrors:true});
 const MAX_VALUE_CHARS=240;
 
 export function artifactContractExample(schema:unknown):unknown {
@@ -10,7 +10,7 @@ export function artifactContractExample(schema:unknown):unknown {
 
 export function validateArtifactContract(value:unknown,schema:unknown):void {
   let validate;
-  try { validate=validator.compile(schema as AnySchema); }
+  try { validate=artifactValidator(schema); }
   catch (error) {
     throw new TaskGraphValidationError(
       `declared artifact output schema is invalid or unsupported: ${errorMessage(error)}`,

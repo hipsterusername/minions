@@ -1,31 +1,9 @@
 import {
   DEFAULT_SANDBOX_POLICY,
-  type FilesystemScope,
   type SandboxPolicy,
 } from "../../shared/workspace-contracts.ts";
 import type { HarnessCapabilities } from "../use-socket.ts";
-
-const ACCESS_OPTIONS: ReadonlyArray<{
-  value: FilesystemScope;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "read-only",
-    label: "Read only",
-    description: "Inspect workspace files without editing them.",
-  },
-  {
-    value: "workspace-write",
-    label: "Workspace write",
-    description: "Read and edit files in authorized project roots.",
-  },
-  {
-    value: "unrestricted",
-    label: "Full host access",
-    description: "Remove the filesystem boundary for this run.",
-  },
-];
+import { SANDBOX_ACCESS_OPTIONS, sandboxAccessValue, withSandboxAccess } from "../sandbox-access.ts";
 
 interface MobileSandboxAccessControlProps {
   policy?: SandboxPolicy | undefined;
@@ -49,18 +27,18 @@ export function MobileSandboxAccessControl({
       <legend>File access</legend>
       {filesystemManaged ? (
         <div className="mob-sandbox-access-options">
-          {ACCESS_OPTIONS.map((option) => {
-            const supported = support === undefined || support.filesystem.includes(option.value);
+          {SANDBOX_ACCESS_OPTIONS.map((option) => {
+            const supported = support === undefined || support.filesystem.includes(option.filesystemScope);
             return (
-              <label key={option.value} data-selected={value.filesystemScope === option.value}>
+              <label key={option.value} data-selected={sandboxAccessValue(value) === option.value}>
                 <input
                   type="radio"
                   name="mobile-sandbox-file-access"
                   value={option.value}
                   aria-label={option.label}
-                  checked={value.filesystemScope === option.value}
+                  checked={sandboxAccessValue(value) === option.value}
                   disabled={!supported}
-                  onChange={() => onChange({ ...value, filesystemScope: option.value })}
+                  onChange={() => onChange(withSandboxAccess(value, option.value))}
                 />
                 <span>
                   <strong>{option.label}</strong>
