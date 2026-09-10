@@ -132,10 +132,11 @@ describe("LeaderPromptBar skill mentions", () => {
 });
 
 describe("LeaderPromptBar slash commands", () => {
-  it("shows context shortcuts and Graph for a slash", () => {
+  it("shows context shortcuts, Graph, and Ship for a slash", () => {
     renderPromptBar({ initialInput: "/" });
 
-    expect(screen.getAllByRole("option")).toHaveLength(4);
+    expect(screen.getAllByRole("option")).toHaveLength(5);
+    expect(screen.getByText("Ship")).toBeInTheDocument();
     expect(screen.getByText("Graph")).toBeInTheDocument();
     expect(screen.getByText("Implement")).toBeInTheDocument();
     expect(screen.getByText("Fix")).toBeInTheDocument();
@@ -153,6 +154,18 @@ describe("LeaderPromptBar slash commands", () => {
 
     expect(screen.getAllByRole("option")).toHaveLength(1);
     expect(screen.getByRole("option", { name: /Review/ })).toBeInTheDocument();
+  });
+
+  it("inserts the Ship review workflow without submitting it", () => {
+    const { onSubmit, onKeyDown } = renderPromptBar({ initialInput: "/ship" });
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(screen.getByLabelText("Leader prompt"), { key: "Enter" });
+    expect(screen.getByLabelText("Leader prompt")).toHaveValue(
+      slashCommands.find(({ id }) => id === "ship")!.insertText,
+    );
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onKeyDown).not.toHaveBeenCalled();
   });
 
   it.each(["/graph", "/crew"])("invokes Graph from %s with Enter", (input) => {

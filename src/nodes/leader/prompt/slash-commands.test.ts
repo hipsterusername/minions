@@ -42,6 +42,25 @@ describe("filterSlashCommands", () => {
 });
 
 describe("buildSlashCommands", () => {
+  it("keeps Ship available when editable actions are empty", () => {
+    const commands = buildSlashCommands({ dashboardLeaderActions: [] });
+    expect(filterSlashCommands(commands, "SHIP")).toEqual([
+      expect.objectContaining({ id: "ship", label: "Ship", icon: "rocket" }),
+    ]);
+  });
+
+  it("preserves custom actions that collide with Ship feature ids", () => {
+    const actions = ["ship", "ship-feature"].map((id) => ({
+      id, name: `Custom ${id}`, prompt: `Run ${id}`, icon: "play", skillIds: [],
+    }));
+    const commands = buildSlashCommands({ dashboardLeaderActions: actions });
+    expect(new Set(commands.map(({ id }) => id)).size).toBe(commands.length);
+    expect(commands.slice(0, 2).map(({ insertText }) => insertText)).toEqual([
+      "Run ship", "Run ship-feature",
+    ]);
+    expect(commands.at(-1)).toMatchObject({ id: "ship-feature-feature", label: "Ship" });
+  });
+
   it.each(["graph", "crew", "CREW", "gra", "cr"])("resolves %s to the same Graph feature", (query) => {
     const commands = buildSlashCommands({ dashboardLeaderActions: [] });
     expect(filterSlashCommands(commands, query)).toEqual([
@@ -69,6 +88,7 @@ describe("buildSlashCommands", () => {
       "improve",
       "analyze",
       "task-graph",
+      "ship",
     ]);
     expect(commands[1]).toEqual({
       id: "improve",

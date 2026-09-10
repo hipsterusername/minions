@@ -52,6 +52,14 @@ for session output. Existing tracked leaks must be removed or sanitized explicit
 
 ## Before submitting a pull request
 
+In the app's prompt composer, select `/ship` to insert a privacy review,
+commit, and push workflow. Review the inserted prompt and submit it to run.
+The agent checks intended changes and outgoing history for personal data and
+secrets, runs required checks, and commits and pushes when the review passes.
+Unresolved findings, ambiguous scope or destination, and failed checks block
+shipping. This is an agent-guided review, not a guarantee that every disclosure
+will be detected.
+
 Run the same gate used by CI:
 
 ```bash
